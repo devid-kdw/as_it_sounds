@@ -1,1 +1,4 @@
-console.log("worker:audio is a placeholder. Future phases will start the AIS audio processing worker here.");
+import { runAudioWorkerCli } from "../../workers/audio/index.mjs";
+
+const result = await runAudioWorkerCli();
+process.exitCode = result.exitCode;

@@ -115,14 +115,32 @@ port = 54324
 [storage]
 enabled = true
 # The maximum file size allowed (e.g. "5MB", "500KB").
-file_size_limit = "50MiB"
+file_size_limit = "500MiB"
 
-# Uncomment to configure local storage buckets
-# [storage.buckets.images]
-# public = false
-# file_size_limit = "50MiB"
-# allowed_mime_types = ["image/png", "image/jpeg"]
-# objects_path = "./images"
+[storage.buckets."ais-originals"]
+public = false
+file_size_limit = "500MiB"
+allowed_mime_types = ["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"]
+
+[storage.buckets."ais-previews"]
+public = true
+file_size_limit = "100MiB"
+allowed_mime_types = ["audio/mpeg", "audio/mp3"]
+
+[storage.buckets."ais-waveforms"]
+public = true
+file_size_limit = "10MiB"
+allowed_mime_types = ["application/json"]
+
+[storage.buckets."ais-album-artwork"]
+public = true
+file_size_limit = "10MiB"
+allowed_mime_types = ["image/jpeg", "image/png", "image/webp"]
+
+[storage.buckets."ais-processing-temp"]
+public = false
+file_size_limit = "500MiB"
+allowed_mime_types = ["audio/wav", "audio/x-wav", "audio/wave", "audio/vnd.wave"]
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
