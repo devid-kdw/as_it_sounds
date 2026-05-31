@@ -5,7 +5,7 @@ Date: 2026-05-31
 ## Files Changed
 
 - `tests/database-rls.test.mjs`
-- `handoff/testing-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/testing-agent-phase-db.md`
 
 ## What Changed
 

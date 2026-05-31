@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { navigationItems } from "@/config/navigation";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export function SiteNav() {
+export async function SiteNav() {
+  const canSeeAdmin = await canSeeAdminNav();
+  const visibleItems = navigationItems.filter((item) => item.href !== "/admin" || canSeeAdmin);
+
   return (
     <header className="border-b border-ais-border-soft bg-[var(--ais-overlay)]">
       <nav className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
@@ -9,7 +13,7 @@ export function SiteNav() {
           As It Sounds
         </Link>
         <div className="hidden items-center gap-1 md:flex">
-          {navigationItems.map((item) => (
+          {visibleItems.map((item) => (
             <Link
               className="rounded-ais-sm px-3 py-2 text-sm text-ais-muted transition duration-ais-base hover:bg-ais-panel hover:text-ais-text"
               href={item.href}
@@ -22,4 +26,27 @@ export function SiteNav() {
       </nav>
     </header>
   );
+}
+
+async function canSeeAdminNav() {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return false;
+    }
+
+    const { data } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    return data?.role === "admin";
+  } catch {
+    return false;
+  }
 }

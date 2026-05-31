@@ -11,12 +11,12 @@
 - `supabase/migrations/0007_indexes.sql`
 - `supabase/migrations/0008_rls_helpers_and_policies.sql`
 - `supabase/migrations/0009_triggers_and_functions.sql`
-- `handoff/supabase-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/supabase-agent-phase-db.md`
 
 Observed but not edited by this agent:
 
 - `types/database.types.ts` was modified elsewhere after this agent was blocked on local Supabase verification/type generation.
-- `handoff/backend-agent-phase-db.md` and `handoff/testing-agent-phase-db.md` were present as untracked files from other agents.
+- `handoff/phase-2-database-supabase/backend-agent-phase-db.md` and `handoff/phase-2-database-supabase/testing-agent-phase-db.md` were present as untracked files from other agents.
 
 ## Scope Implemented
 

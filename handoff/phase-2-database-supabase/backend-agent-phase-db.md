@@ -6,7 +6,7 @@ Agent role: Backend server-side Supabase helpers
 ## Files Changed
 
 - `lib/supabase/admin.ts`
-- `handoff/backend-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/backend-agent-phase-db.md`
 
 ## Rationale
 

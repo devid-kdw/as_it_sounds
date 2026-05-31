@@ -5,9 +5,9 @@ Orchestrator: Codex
 
 ## Agent Handoffs
 
-- Supabase agent: `handoff/supabase-agent-phase-db.md`
-- Backend agent: `handoff/backend-agent-phase-db.md`
-- Testing agent: `handoff/testing-agent-phase-db.md`
+- Supabase agent: `handoff/phase-2-database-supabase/supabase-agent-phase-db.md`
+- Backend agent: `handoff/phase-2-database-supabase/backend-agent-phase-db.md`
+- Testing agent: `handoff/phase-2-database-supabase/testing-agent-phase-db.md`
 
 ## Files Changed
 
@@ -23,10 +23,10 @@ Orchestrator: Codex
 - `types/database.types.ts`
 - `lib/supabase/admin.ts`
 - `tests/database-rls.test.mjs`
-- `handoff/backend-agent-phase-db.md`
-- `handoff/supabase-agent-phase-db.md`
-- `handoff/testing-agent-phase-db.md`
-- `handoff/phase-2-database-supabase-orchestrator.md`
+- `handoff/phase-2-database-supabase/backend-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/supabase-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/testing-agent-phase-db.md`
+- `handoff/phase-2-database-supabase/phase-2-database-supabase-orchestrator.md`
 
 ## Implementation Summary
 

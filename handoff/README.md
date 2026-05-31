@@ -20,11 +20,15 @@ Each handoff note should include:
 
 Keep handoff notes factual. Do not use this folder for speculative product decisions, hidden assumptions, or undocumented feature expansion.
 
-## Current Files
+## Folder Layout
 
-- `phase-0-repo-boundary.md` records the repository boundary setup.
-- `phase-1-foundation-skeleton.md` records the local development skeleton setup.
+- `phase-0-repo-boundary/` records the repository boundary setup.
+- `phase-1-foundation-skeleton/` records the local development skeleton setup.
+- `phase-2-database-supabase/` records database, Supabase, RLS, and generated type work.
+- `phase-auth-local-owner/` records authentication, local owner access, entitlement, and billing-disabled work.
 - `next-steps.md` records the recommended next implementation path.
+
+Keep phase-specific handoff notes inside the matching phase folder. Leave this `README.md` and broad planning notes in the root of `handoff/`.
 
 ## Standing Rules
 
