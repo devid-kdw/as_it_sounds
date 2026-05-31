@@ -1,0 +1,2 @@
+-- AIS foundation seed placeholder.
+-- No application tables or production seed data are created in this phase.

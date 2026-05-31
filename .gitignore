@@ -1,0 +1,84 @@
+# Environment and local secrets
+.env
+.env.local
+.env.*.local
+.env.keys
+.secrets/
+secrets/
+secrets.local.*
+*.pem
+*.key
+*.p12
+*.cert
+
+# Dependencies and package-manager caches
+node_modules/
+.pnpm-store/
+.pnpm-debug.log*
+.npm/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
+
+# Next.js, build, and test output
+.next/
+out/
+dist/
+build/
+coverage/
+.nyc_output/
+.eslintcache
+*.tsbuildinfo
+.turbo/
+.vercel/
+.cache/
+
+# Supabase local runtime and temp state
+.supabase/
+supabase/.branches/
+supabase/.cache/
+supabase/.temp/
+supabase/.runtime/
+supabase/.local/
+supabase/.env.local
+supabase/.env.*.local
+
+# AIS local media, caches, and producer workflow folders
+.local/
+incoming/
+library_originals/
+processed_previews/
+waveform_peaks/
+cache/
+local-cache/
+local-audio/
+audio-library/
+fl_dropzone/
+exports/
+logs/
+project_crates/
+project_crates/**/crate.json
+*.ais-crate.json
+
+# Local audio assets must not be committed unless an approved fixtures folder is added later.
+*.wav
+*.aiff
+*.aif
+*.mp3
+*.ogg
+*.flac
+*.m4a
+
+# Rust plugin build output
+target/
+debug/
+release/
+*.rlib
+*.rmeta
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

@@ -1,0 +1,176 @@
+@import "tailwindcss";
+
+:root {
+  --ais-bg: #07110D;
+  --ais-surface: #101C16;
+  --ais-elevated: #18251D;
+  --ais-panel: #0D1813;
+  --ais-overlay: rgba(7, 17, 13, 0.88);
+  --ais-border: #2B3A2F;
+  --ais-border-soft: #223025;
+  --ais-text: #E8E1D2;
+  --ais-text-muted: #9C9A89;
+  --ais-text-faint: #747969;
+  --ais-amber: #C8924A;
+  --ais-moss: #8A9A5B;
+  --ais-pale-green: #B9C9A2;
+  --ais-danger: #B8624B;
+  --ais-warning: #C9A35A;
+  --ais-success: #8FAF7A;
+  --ais-r-sm: 12px;
+  --ais-r-md: 20px;
+  --ais-r-lg: 28px;
+  --ais-r-xl: 36px;
+  --ais-t-fast: 150ms;
+  --ais-t-base: 220ms;
+  --ais-t-panel: 360ms;
+  --ais-t-slow: 600ms;
+  --ais-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ais-serif: "IM Fell English", Georgia, serif;
+  --ais-sans: "DM Sans", system-ui, sans-serif;
+  --ais-mono: "DM Mono", ui-monospace, monospace;
+}
+
+@theme inline {
+  --color-ais-bg: var(--ais-bg);
+  --color-ais-surface: var(--ais-surface);
+  --color-ais-elevated: var(--ais-elevated);
+  --color-ais-panel: var(--ais-panel);
+  --color-ais-border: var(--ais-border);
+  --color-ais-border-soft: var(--ais-border-soft);
+  --color-ais-text: var(--ais-text);
+  --color-ais-muted: var(--ais-text-muted);
+  --color-ais-faint: var(--ais-text-faint);
+  --color-ais-amber: var(--ais-amber);
+  --color-ais-moss: var(--ais-moss);
+  --color-ais-pale-green: var(--ais-pale-green);
+  --color-ais-danger: var(--ais-danger);
+  --color-ais-warning: var(--ais-warning);
+  --color-ais-success: var(--ais-success);
+  --radius-ais-sm: var(--ais-r-sm);
+  --radius-ais-md: var(--ais-r-md);
+  --radius-ais-lg: var(--ais-r-lg);
+  --radius-ais-xl: var(--ais-r-xl);
+  --font-ais-serif: var(--ais-serif);
+  --font-ais-sans: var(--ais-sans);
+  --font-ais-mono: var(--ais-mono);
+  --duration-ais-fast: var(--ais-t-fast);
+  --duration-ais-base: var(--ais-t-base);
+  --duration-ais-panel: var(--ais-t-panel);
+  --duration-ais-slow: var(--ais-t-slow);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--ais-bg);
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(138, 154, 91, 0.08), transparent 34rem),
+    radial-gradient(circle at 80% 12%, rgba(200, 146, 74, 0.08), transparent 28rem),
+    var(--ais-bg);
+  color: var(--ais-text);
+  font-family: var(--ais-sans);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(200, 146, 74, 0.3);
+  color: var(--ais-text);
+}
+
+:focus-visible {
+  outline: 2px solid var(--ais-amber);
+  outline-offset: 3px;
+}
+
+.ais-shell {
+  position: relative;
+  isolation: isolate;
+}
+
+.ais-shell::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  content: "";
+  opacity: 0.42;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.42'/%3E%3C/svg%3E");
+}
+
+.ais-shell::after {
+  position: fixed;
+  top: -12rem;
+  right: -16rem;
+  z-index: -1;
+  width: 44rem;
+  height: 44rem;
+  pointer-events: none;
+  content: "";
+  opacity: 0.08;
+  background: repeating-radial-gradient(circle, transparent 0 22px, var(--ais-moss) 23px 24px, transparent 25px 48px);
+}
+
+.ais-display,
+.ais-title,
+.ais-name {
+  font-family: var(--ais-serif);
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.ais-meta,
+.ais-slug {
+  font-family: var(--ais-mono);
+  letter-spacing: 0;
+  text-transform: lowercase;
+}
+
+.ais-shimmer {
+  background: linear-gradient(90deg, var(--ais-surface) 0%, var(--ais-elevated) 50%, var(--ais-surface) 100%);
+  background-size: 200% 100%;
+  animation: ais-shimmer 2.4s ease-in-out infinite;
+}
+
+@keyframes ais-shimmer {
+  from {
+    background-position: -200% 0;
+  }
+
+  to {
+    background-position: 200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
