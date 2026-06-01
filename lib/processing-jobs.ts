@@ -16,6 +16,7 @@ import {
   toSafePipelineError,
 } from "@/lib/errors";
 import { tryWriteAdminAuditLog } from "@/lib/admin-audit";
+import { createStorageProvider, type StorageProvider, type StoredObjectRef } from "@/lib/storage";
 
 export type ProcessingJobRow = PublicTableRow<"processing_jobs">;
 export type ProcessingJobStatus = ProcessingJobRow["status"];
@@ -42,9 +43,9 @@ export type ProcessingJobAssetPayload = {
 export type ProcessingJobSuccessPayload = {
   source: ProcessingJobSourceMetadata;
   assets: {
-    original_wav: ProcessingJobAssetPayload;
-    preview_audio: ProcessingJobAssetPayload;
-    waveform_peaks: ProcessingJobAssetPayload;
+    original_wav?: ProcessingJobAssetPayload;
+    preview_audio?: ProcessingJobAssetPayload;
+    waveform_peaks?: ProcessingJobAssetPayload;
   };
   warnings?: Json;
   tool_versions?: Json;
@@ -78,11 +79,13 @@ export type ProcessingJobClaimResult =
 
 type ProcessingJobServiceOptions = {
   supabase?: SupabaseDatabaseClient;
+  storage?: Pick<StorageProvider, "exists">;
   now?: () => Date;
   actorUserId?: string | null;
 };
 
 const RETRYABLE_TERMINAL_STATUSES: ProcessingJobStatus[] = ["failed", "canceled", "timed_out"];
+const MIN_STUCK_JOB_AGE_MS = 15 * 60 * 1000;
 const RETRYABLE_JOB_TYPES: ProcessingJobType[] = [
   "initial_upload",
   "reprocess_preview",
@@ -253,39 +256,9 @@ export async function markProcessingJobSucceeded(
     throw new AISUserSafeError("Processing job has no sample to update.", "processing_job_sample_missing", 409);
   }
 
-  const assetRows: PublicTableInsert<"sample_assets">[] = [
-    {
-      sample_id: job.sample_id,
-      kind: "original_wav",
-      bucket: payload.assets.original_wav.bucket,
-      object_path: payload.assets.original_wav.object_path,
-      mime_type: payload.source.mime_type ?? "audio/wav",
-      file_size_bytes: payload.assets.original_wav.file_size_bytes,
-      checksum_sha256: payload.assets.original_wav.checksum_sha256,
-      access_level: "private",
-    },
-    {
-      sample_id: job.sample_id,
-      kind: "preview_audio",
-      bucket: payload.assets.preview_audio.bucket,
-      object_path: payload.assets.preview_audio.object_path,
-      mime_type: "audio/mpeg",
-      file_size_bytes: payload.assets.preview_audio.file_size_bytes,
-      checksum_sha256: payload.assets.preview_audio.checksum_sha256,
-      access_level: "public",
-    },
-    {
-      sample_id: job.sample_id,
-      kind: "waveform_peaks",
-      bucket: payload.assets.waveform_peaks.bucket,
-      object_path: payload.assets.waveform_peaks.object_path,
-      mime_type: "application/json",
-      file_size_bytes: payload.assets.waveform_peaks.file_size_bytes,
-      checksum_sha256: payload.assets.waveform_peaks.checksum_sha256,
-      access_level: "public",
-    },
-  ];
+  const assetRows = assetRowsForSucceededJob(job, payload);
 
+  // sample_assets preview_audio and sample_assets waveform_peaks rows are upserted only after a successful job payload is validated.
   const { error: assetsError } = await supabase
     .from("sample_assets")
     .upsert(assetRows, { onConflict: "sample_id,kind" });
@@ -301,8 +274,6 @@ export async function markProcessingJobSucceeded(
 
   const jobUpdate: PublicTableUpdate<"processing_jobs"> = {
     status: "succeeded",
-    output_preview_path: payload.assets.preview_audio.object_path,
-    output_waveform_path: payload.assets.waveform_peaks.object_path,
     metadata: mergeJobMetadata(job.metadata, {
       warnings: payload.warnings,
       tool_versions: payload.tool_versions,
@@ -313,6 +284,15 @@ export async function markProcessingJobSucceeded(
     last_error_code: null,
     last_error_message: null,
   };
+
+  if (payload.assets.preview_audio) {
+    jobUpdate.output_preview_path = payload.assets.preview_audio.object_path;
+  }
+
+  if (payload.assets.waveform_peaks) {
+    jobUpdate.output_waveform_path = payload.assets.waveform_peaks.object_path;
+  }
+
   const { data, error: jobError } = await supabase
     .from("processing_jobs")
     .update(jobUpdate)
@@ -322,6 +302,10 @@ export async function markProcessingJobSucceeded(
 
   if (jobError) {
     throw new AISUserSafeError("Unable to mark the processing job as succeeded.", "processing_job_update_failed", 500);
+  }
+
+  if (job.job_type !== "initial_upload") {
+    return data;
   }
 
   const sampleSuccessUpdate: PublicTableUpdate<"samples"> = {
@@ -351,6 +335,114 @@ export async function markProcessingJobSucceeded(
   return data;
 }
 
+function assetRowsForSucceededJob(
+  job: ProcessingJobRow,
+  payload: ProcessingJobSuccessPayload,
+): PublicTableInsert<"sample_assets">[] {
+  if (!job.sample_id) {
+    throw new AISUserSafeError("Processing job has no sample to update.", "processing_job_sample_missing", 409);
+  }
+
+  if (job.job_type === "initial_upload") {
+    const originalAsset = requirePayloadAsset(job, payload, "original_wav");
+    const previewAsset = requirePayloadAsset(job, payload, "preview_audio");
+    const waveformAsset = requirePayloadAsset(job, payload, "waveform_peaks");
+
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "original_wav",
+        asset: originalAsset,
+        mimeType: payload.source.mime_type ?? "audio/wav",
+        accessLevel: "private",
+      }),
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "preview_audio",
+        asset: previewAsset,
+        mimeType: "audio/mpeg",
+        accessLevel: "public",
+      }),
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "waveform_peaks",
+        asset: waveformAsset,
+        mimeType: "application/json",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  if (job.job_type === "reprocess_preview") {
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "preview_audio",
+        asset: requirePayloadAsset(job, payload, "preview_audio"),
+        mimeType: "audio/mpeg",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  if (job.job_type === "reprocess_waveform") {
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "waveform_peaks",
+        asset: requirePayloadAsset(job, payload, "waveform_peaks"),
+        mimeType: "application/json",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  throw new AISUserSafeError("Processing job type is not supported.", "processing_job_type_unsupported", 409);
+}
+
+function requirePayloadAsset(
+  job: ProcessingJobRow,
+  payload: ProcessingJobSuccessPayload,
+  kind: keyof ProcessingJobSuccessPayload["assets"],
+) {
+  const asset = payload.assets[kind];
+
+  if (!asset) {
+    throw new AISUserSafeError(
+      `Processing result is missing ${kind}.`,
+      "processing_result_asset_missing",
+      500,
+    );
+  }
+
+  return asset;
+}
+
+function sampleAssetRow({
+  sampleId,
+  kind,
+  asset,
+  mimeType,
+  accessLevel,
+}: {
+  sampleId: string;
+  kind: "original_wav" | "preview_audio" | "waveform_peaks";
+  asset: ProcessingJobAssetPayload;
+  mimeType: string;
+  accessLevel: "private" | "public";
+}): PublicTableInsert<"sample_assets"> {
+  return {
+    sample_id: sampleId,
+    kind,
+    bucket: asset.bucket,
+    object_path: asset.object_path,
+    mime_type: mimeType,
+    file_size_bytes: asset.file_size_bytes,
+    checksum_sha256: asset.checksum_sha256,
+    access_level: accessLevel,
+  };
+}
+
 export async function markProcessingJobFailed(
   jobId: string,
   errorInput: PipelineErrorInput | unknown,
@@ -365,6 +457,69 @@ export async function markProcessingJobTimedOut(
   options: ProcessingJobServiceOptions = {},
 ) {
   return markProcessingJobTerminal(jobId, "timed_out", errorInput, options);
+}
+
+export function isProcessingJobStuck(
+  job: Pick<ProcessingJobRow, "status" | "updated_at" | "started_at"> & { metadata?: Json },
+  options: { now?: () => Date; maxDurationSeconds?: number } | Date = {},
+) {
+  if (job.status !== "running") {
+    return false;
+  }
+
+  const referenceTime = Date.parse(job.updated_at ?? job.started_at ?? "");
+
+  if (!Number.isFinite(referenceTime)) {
+    return false;
+  }
+
+  const now = options instanceof Date ? options : options.now?.() ?? new Date();
+  const maxDurationSeconds = options instanceof Date
+    ? getJobMetadataNumber(job.metadata ?? null, "max_duration_seconds") ?? 1800
+    : options.maxDurationSeconds ?? getJobMetadataNumber(job.metadata ?? null, "max_duration_seconds") ?? 1800;
+  const thresholdMs = Math.max(MIN_STUCK_JOB_AGE_MS, (maxDurationSeconds * 1000) / 2);
+
+  return now.getTime() - referenceTime > thresholdMs;
+}
+
+export async function markStuckProcessingJobsTimedOut(
+  options: ProcessingJobServiceOptions & { maxDurationSeconds?: number; limit?: number } = {},
+) {
+  const supabase = getSupabase(options);
+  const { data, error } = await supabase
+    .from("processing_jobs")
+    .select("*")
+    .eq("status", "running")
+    .order("updated_at", { ascending: true })
+    .limit(options.limit ?? 100);
+
+  if (error) {
+    throw new AISUserSafeError("Unable to load stuck processing jobs.", "processing_job_stuck_lookup_failed", 500);
+  }
+
+  const stuckJobs = (data ?? []).filter((job) =>
+    isProcessingJobStuck(job, {
+      now: options.now,
+      maxDurationSeconds: options.maxDurationSeconds,
+    }),
+  );
+  const timedOutJobs: ProcessingJobRow[] = [];
+
+  for (const job of stuckJobs) {
+    timedOutJobs.push(
+      await markProcessingJobTimedOut(
+        job.id,
+        { code: "WORKER_TIMEOUT" },
+        { ...options, supabase },
+      ),
+    );
+  }
+
+  return {
+    checked: data?.length ?? 0,
+    timed_out: timedOutJobs.length,
+    jobs: timedOutJobs,
+  };
 }
 
 export function determineProcessingJobRetryEligibility(
@@ -462,6 +617,20 @@ export async function queueProcessingJobRetry(
     };
   }
 
+  const sourceAvailability = await determineRetrySourceAvailability(supabase, job, options);
+
+  if (!sourceAvailability.available) {
+    return {
+      queued: false,
+      job,
+      eligibility: {
+        ...eligibility,
+        eligible: false,
+        reason: sourceAvailability.reason,
+      },
+    };
+  }
+
   const update: PublicTableUpdate<"processing_jobs"> = {
     status: "queued",
     started_at: null,
@@ -501,6 +670,173 @@ export async function queueProcessingJobRetry(
     job: data,
     eligibility: determineProcessingJobRetryEligibility(data, mode),
   };
+}
+
+export async function createSampleReprocessJob(
+  sampleId: string,
+  jobType: Extract<ProcessingJobType, "reprocess_preview" | "reprocess_waveform">,
+  options: ProcessingJobServiceOptions = {},
+) {
+  const supabase = getSupabase(options);
+  const [{ data: sample, error: sampleError }, { data: originalAsset, error: assetError }] = await Promise.all([
+    supabase.from("samples").select("id,status").eq("id", sampleId).maybeSingle(),
+    supabase
+      .from("sample_assets")
+      .select("bucket,object_path,kind,access_level")
+      .eq("sample_id", sampleId)
+      .eq("kind", "original_wav")
+      .maybeSingle(),
+  ]);
+
+  if (sampleError) {
+    throw new AISUserSafeError("Unable to load sample for reprocessing.", "processing_sample_lookup_failed", 500);
+  }
+
+  if (!sample) {
+    throw new AISUserSafeError("Sample was not found.", "processing_sample_not_found", 404);
+  }
+
+  if (assetError) {
+    throw new AISUserSafeError("Unable to load original asset for reprocessing.", "processing_original_asset_lookup_failed", 500);
+  }
+
+  if (!originalAsset) {
+    throw new AISUserSafeError("Original WAV asset is required before reprocessing.", "processing_original_asset_missing", 409);
+  }
+
+  const storageProvider = options.storage;
+  if (storageProvider) {
+    const exists = await storageProvider.exists({
+      bucket: originalAsset.bucket,
+      objectPath: originalAsset.object_path,
+    }).catch(() => false);
+
+    if (!exists) {
+      throw new AISUserSafeError("Original WAV asset is missing in storage.", "processing_original_asset_missing", 409);
+    }
+  }
+
+  const replaceAssetKind = jobType === "reprocess_preview" ? "preview_audio" : "waveform_peaks";
+  const insert: PublicTableInsert<"processing_jobs"> = {
+    sample_id: sampleId,
+    job_type: jobType,
+    status: "queued",
+    input_bucket: originalAsset.bucket,
+    input_path: originalAsset.object_path,
+    metadata: {
+      requested_by: options.actorUserId ?? null,
+      requested_at: getNowIso(options),
+      source_asset_kind: "original_wav",
+      replace_asset_kind: replaceAssetKind,
+      replacement_policy: "swap_after_success",
+    },
+  };
+  const { data: job, error: jobError } = await supabase
+    .from("processing_jobs")
+    .insert(insert)
+    .select("*")
+    .single();
+
+  if (jobError || !job) {
+    throw new AISUserSafeError("Unable to queue the reprocess job.", "processing_reprocess_queue_failed", 500);
+  }
+
+  await tryWriteAdminAuditLog(supabase, {
+    actorUserId: options.actorUserId ?? null,
+    action: jobType === "reprocess_preview"
+      ? "sample.reprocess_preview_requested"
+      : "sample.reprocess_waveform_requested",
+    entityType: "sample",
+    entityId: sampleId,
+    afterData: {
+      processing_job_id: job.id,
+      job_type: job.job_type,
+      status: job.status,
+      replacement_policy: "swap_after_success",
+    },
+  });
+
+  return job;
+}
+
+async function determineRetrySourceAvailability(
+  supabase: SupabaseDatabaseClient,
+  job: ProcessingJobRow,
+  options: ProcessingJobServiceOptions,
+) {
+  const sourceRef =
+    job.job_type === "initial_upload"
+      ? inputRefFromJob(job)
+      : await originalAssetRefForJob(supabase, job);
+
+  if (!sourceRef) {
+    return {
+      available: false,
+      reason:
+        job.job_type === "initial_upload"
+          ? "Retry source object is missing from the processing job."
+          : "Original WAV asset is missing; reprocess cannot be retried.",
+    };
+  }
+
+  try {
+    const storageProvider = options.storage ?? createStorageProvider(supabase);
+    const exists = await storageProvider.exists(sourceRef);
+
+    return exists
+      ? { available: true, reason: null }
+      : { available: false, reason: "Retry source object no longer exists in storage." };
+  } catch {
+    return {
+      available: false,
+      reason: "Retry source object could not be verified.",
+    };
+  }
+}
+
+async function originalAssetRefForJob(
+  supabase: SupabaseDatabaseClient,
+  job: ProcessingJobRow,
+): Promise<StoredObjectRef | null> {
+  if (!job.sample_id) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("sample_assets")
+    .select("bucket,object_path")
+    .eq("sample_id", job.sample_id)
+    .eq("kind", "original_wav")
+    .maybeSingle();
+
+  if (error || !data?.bucket || !data?.object_path) {
+    return null;
+  }
+
+  return {
+    bucket: data.bucket,
+    objectPath: data.object_path,
+  };
+}
+
+function inputRefFromJob(job: ProcessingJobRow) {
+  const metadata = objectMetadata(job.metadata);
+  const inputMetadata = objectMetadata(metadata.input);
+  const bucket =
+    job.input_bucket ??
+    getStringMetadata(metadata, "input_bucket") ??
+    getStringMetadata(inputMetadata, "bucket");
+  const objectPath =
+    job.input_path ??
+    getStringMetadata(metadata, "input_path") ??
+    getStringMetadata(inputMetadata, "path") ??
+    getStringMetadata(inputMetadata, "object_path");
+
+  if (!bucket || !objectPath) {
+    return null;
+  }
+
+  return { bucket, objectPath };
 }
 
 async function markProcessingJobTerminal(
@@ -649,6 +985,26 @@ function getJobMetadataValue(metadata: Json, key: string): Json | null {
 
   const value = metadata[key];
   return value === undefined ? null : value;
+}
+
+function objectMetadata(metadata: Json): Record<string, Json> {
+  return typeof metadata === "object" && metadata !== null && !Array.isArray(metadata)
+    ? (metadata as Record<string, Json>)
+    : {};
+}
+
+function getStringMetadata(metadata: Record<string, Json>, key: string) {
+  const value = metadata[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function getJobMetadataNumber(metadata: Json, key: string) {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = metadata[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function getSupabase(options: ProcessingJobServiceOptions) {

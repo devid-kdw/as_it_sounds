@@ -6,7 +6,8 @@ import path from "node:path";
 import { AudioProcessingError, AudioWorkerConfigurationError, normalizeProcessingError } from "./errors.mjs";
 import { sha256Buffer, sha256File } from "./hashing.mjs";
 import { buildDecodeTestCommand, runFfprobeMetadata } from "./metadata.mjs";
-import { parseWaveformPeaksJson } from "./peaks.mjs";
+import { buildWaveformCommand, buildWaveformObjectPath, parseWaveformPeaksJson } from "./peaks.mjs";
+import { buildPreviewCommand, buildPreviewObjectPath } from "./preview.mjs";
 import { buildLocalProcessingPlan } from "./local-audio-processor.mjs";
 import {
   createAssetDescriptor,
@@ -32,6 +33,8 @@ export const AUDIO_STORAGE_BUCKETS = Object.freeze({
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/i;
+const AUDIO_JOB_TYPES = Object.freeze(["initial_upload", "reprocess_preview", "reprocess_waveform"]);
+const MIN_STUCK_JOB_AGE_MS = 15 * 60 * 1000;
 
 export function createAudioWorkerSupabaseClient(env = process.env) {
   const supabaseUrl = env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL;
@@ -53,7 +56,11 @@ export function createAudioWorkerSupabaseClient(env = process.env) {
   });
 }
 
-export async function processInitialUploadJob({
+export async function processInitialUploadJob(options = {}) {
+  return processAudioJob(options);
+}
+
+export async function processAudioJob({
   processingJobId = null,
   supabase,
   settings,
@@ -70,7 +77,11 @@ export async function processInitialUploadJob({
   let tempDirectory = null;
 
   try {
-    const claimed = await claimQueuedInitialUploadJob({ supabase, processingJobId, now });
+    if (!processingJobId) {
+      await markStuckAudioJobsTimedOut({ supabase, settings, logger, now });
+    }
+
+    const claimed = await claimQueuedAudioJob({ supabase, processingJobId, now });
 
     if (!claimed.claimed) {
       return {
@@ -87,7 +98,7 @@ export async function processInitialUploadJob({
     await updateInitialUploadSampleStatus({ supabase, job, status: "processing", now });
 
     tempDirectory = await mkdtemp(path.join(tmpdir(), `ais-audio-${job.id}-`));
-    const payload = await runInitialUploadPipeline({
+    const payload = await runPipelineForJob({
       supabase,
       job,
       settings,
@@ -127,9 +138,13 @@ export async function processInitialUploadJob({
 }
 
 export async function claimQueuedInitialUploadJob({ supabase, processingJobId = null, now = () => new Date() }) {
+  return claimQueuedAudioJob({ supabase, processingJobId, now });
+}
+
+export async function claimQueuedAudioJob({ supabase, processingJobId = null, now = () => new Date() }) {
   const job = processingJobId
     ? await fetchProcessingJob({ supabase, processingJobId })
-    : await fetchNextQueuedInitialUploadJob({ supabase });
+    : await fetchNextQueuedAudioJob({ supabase });
 
   if (!job) {
     return {
@@ -158,12 +173,21 @@ export async function claimQueuedInitialUploadJob({ supabase, processingJobId = 
     };
   }
 
-  if (job.job_type !== "initial_upload") {
+  if (!AUDIO_JOB_TYPES.includes(job.job_type)) {
     return {
       claimed: false,
       status: "not_claimed",
       job,
-      reason: `Processing job type ${job.job_type} is not handled by the initial upload worker.`,
+      reason: `Processing job type ${job.job_type} is not handled by the audio worker.`,
+    };
+  }
+
+  if (Number(job.attempts ?? 0) >= Number(job.max_attempts ?? 0)) {
+    return {
+      claimed: false,
+      status: "not_claimed",
+      job,
+      reason: "Processing job has no attempts remaining.",
     };
   }
 
@@ -205,6 +229,32 @@ export async function claimQueuedInitialUploadJob({ supabase, processingJobId = 
     job: data,
     reason: null,
   };
+}
+
+async function runPipelineForJob({
+  supabase,
+  job,
+  settings,
+  binaries,
+  tempDirectory,
+  logger,
+}) {
+  if (job.job_type === "initial_upload") {
+    return runInitialUploadPipeline({ supabase, job, settings, binaries, tempDirectory, logger });
+  }
+
+  if (job.job_type === "reprocess_preview") {
+    return runReprocessPreviewPipeline({ supabase, job, settings, binaries, tempDirectory, logger });
+  }
+
+  if (job.job_type === "reprocess_waveform") {
+    return runReprocessWaveformPipeline({ supabase, job, settings, binaries, tempDirectory, logger });
+  }
+
+  throw new AudioProcessingError("DB_UPDATE_FAILED", "Unsupported audio processing job type.", {
+    processing_job_id: job.id,
+    job_type: job.job_type,
+  });
 }
 
 async function runInitialUploadPipeline({
@@ -365,6 +415,212 @@ async function runInitialUploadPipeline({
   });
 }
 
+async function runReprocessPreviewPipeline({
+  supabase,
+  job,
+  settings,
+  binaries,
+  tempDirectory,
+  logger,
+}) {
+  const startMs = Date.now();
+  const { sourceFile, source, sourceRef, metadata } = await prepareOriginalSourceForReprocess({
+    supabase,
+    job,
+    settings,
+    binaries,
+    tempDirectory,
+    logger,
+  });
+  const outputsDirectory = path.join(tempDirectory, "outputs");
+  const previewObjectPath = buildPreviewObjectPath({
+    sampleId: job.sample_id,
+    processingJobId: job.id,
+    format: settings.previewFormat,
+  });
+  const previewFile = path.join(outputsDirectory, previewObjectPath);
+  await mkdir(path.dirname(previewFile), { recursive: true });
+
+  await runCheckedAudioCommand({
+    ...buildPreviewCommand({
+      ffmpegPath: binaries.ffmpeg.path,
+      inputFile: sourceFile,
+      outputFile: previewFile,
+      settings,
+      sourceSampleRate: metadata.sampleRate,
+    }),
+    timeoutMs: commandTimeoutMs(settings),
+    errorCode: "PREVIEW_GENERATION_FAILED",
+    errorMessage: "Preview transcode failed.",
+  });
+
+  const previewRef = {
+    bucket: AUDIO_STORAGE_BUCKETS.previews,
+    objectPath: previewObjectPath,
+  };
+  const previewAsset = await uploadGeneratedAssetIfNeeded({
+    supabase,
+    ref: previewRef,
+    filePath: previewFile,
+    contentType: "audio/mpeg",
+  });
+  const toolVersions = await collectToolVersions(binaries);
+
+  return createWorkerSuccessPayload({
+    sampleId: job.sample_id,
+    processingJobId: job.id,
+    source: sourcePayloadFromOriginal({ source, sourceRef, metadata }),
+    assets: {
+      preview_audio: previewAsset,
+    },
+    toolVersions,
+    processingDurationMs: Date.now() - startMs,
+  });
+}
+
+async function runReprocessWaveformPipeline({
+  supabase,
+  job,
+  settings,
+  binaries,
+  tempDirectory,
+  logger,
+}) {
+  const startMs = Date.now();
+  const { sourceFile, source, sourceRef, metadata } = await prepareOriginalSourceForReprocess({
+    supabase,
+    job,
+    settings,
+    binaries,
+    tempDirectory,
+    logger,
+  });
+  const outputsDirectory = path.join(tempDirectory, "outputs");
+  const waveformObjectPath = buildWaveformObjectPath({
+    sampleId: job.sample_id,
+    processingJobId: job.id,
+  });
+  const waveformFile = path.join(outputsDirectory, waveformObjectPath);
+  await mkdir(path.dirname(waveformFile), { recursive: true });
+
+  await runCheckedAudioCommand({
+    ...buildWaveformCommand({
+      audiowaveformPath: binaries.audiowaveform.path,
+      inputFile: sourceFile,
+      outputFile: waveformFile,
+      settings,
+    }),
+    timeoutMs: commandTimeoutMs(settings),
+    errorCode: "WAVEFORM_GENERATION_FAILED",
+    errorMessage: "Peaks generation failed.",
+  });
+
+  await validateWaveformOutput(waveformFile);
+
+  const waveformRef = {
+    bucket: AUDIO_STORAGE_BUCKETS.waveforms,
+    objectPath: waveformObjectPath,
+  };
+  const waveformAsset = await uploadGeneratedAssetIfNeeded({
+    supabase,
+    ref: waveformRef,
+    filePath: waveformFile,
+    contentType: "application/json",
+  });
+  const toolVersions = await collectToolVersions(binaries);
+
+  return createWorkerSuccessPayload({
+    sampleId: job.sample_id,
+    processingJobId: job.id,
+    source: sourcePayloadFromOriginal({ source, sourceRef, metadata }),
+    assets: {
+      waveform_peaks: waveformAsset,
+    },
+    toolVersions,
+    processingDurationMs: Date.now() - startMs,
+  });
+}
+
+async function prepareOriginalSourceForReprocess({
+  supabase,
+  job,
+  settings,
+  binaries,
+  tempDirectory,
+  logger,
+}) {
+  if (!job.sample_id) {
+    throw new AudioProcessingError("SOURCE_NOT_FOUND", "Reprocess job has no sample to read.", {
+      processing_job_id: job.id,
+    });
+  }
+
+  const originalAsset = await fetchOriginalWavAsset({ supabase, sampleId: job.sample_id });
+  const sourceRef = {
+    bucket: originalAsset.bucket,
+    objectPath: originalAsset.object_path,
+  };
+  const sourceFile = path.join(tempDirectory, "original.wav");
+  logger("info", "audio_worker_downloading_original", {
+    processing_job_id: job.id,
+    sample_id: job.sample_id,
+    original: sourceRef,
+  });
+  const source = await downloadSourceObject({ supabase, ref: sourceRef, outputFile: sourceFile });
+
+  validateWavHeader(source.buffer, settings);
+
+  const sourceDescriptor = {
+    filePath: sourceRef.objectPath,
+    mimeType: originalAsset.mime_type ?? "audio/wav",
+    fileSizeBytes: source.fileSizeBytes,
+  };
+  const sourceValidation = validateSourceDescriptor(sourceDescriptor, settings);
+  throwFirstValidationError(sourceValidation);
+
+  const metadata = await runFfprobeMetadata({
+    ffprobePath: binaries.ffprobe.path,
+    inputFile: sourceFile,
+    timeoutMs: 30_000,
+  });
+  const normalizedMetadata = {
+    ...metadata,
+    fileSizeBytes: source.fileSizeBytes,
+  };
+  const metadataValidation = validateWavMetadata(normalizedMetadata, settings);
+  throwFirstValidationError(metadataValidation);
+
+  const decodeCommand = buildDecodeTestCommand(binaries.ffmpeg.path, sourceFile);
+  const decodeResult = await runAudioCommand({
+    ...decodeCommand,
+    timeoutMs: commandTimeoutMs(settings),
+    errorCode: "DECODE_FAILED",
+    errorMessage: "Decoder failed to read WAV data.",
+  });
+  const decodeValidation = validateDecodeResult(decodeResult);
+  throwFirstValidationError(decodeValidation);
+
+  return {
+    sourceFile,
+    source,
+    sourceRef,
+    metadata: normalizedMetadata,
+  };
+}
+
+function sourcePayloadFromOriginal({ source, sourceRef, metadata }) {
+  return {
+    file_size_bytes: source.fileSizeBytes,
+    duration_seconds: metadata.durationSeconds,
+    sample_rate: metadata.sampleRate,
+    bit_depth: metadata.bitDepth,
+    channels: metadata.channels,
+    mime_type: metadata.mimeType ?? "audio/wav",
+    original_bucket: sourceRef.bucket,
+    original_object_path: sourceRef.objectPath,
+  };
+}
+
 async function markProcessingJobSucceeded({ supabase, job, payload, now = () => new Date() }) {
   if (!job.sample_id) {
     throw new AudioProcessingError("DB_UPDATE_FAILED", "Processing job has no sample to update.", {
@@ -372,38 +628,7 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
     });
   }
 
-  const assetRows = [
-    {
-      sample_id: job.sample_id,
-      kind: "original_wav",
-      bucket: payload.assets.original_wav.bucket,
-      object_path: payload.assets.original_wav.object_path,
-      mime_type: payload.source.mime_type ?? "audio/wav",
-      file_size_bytes: payload.assets.original_wav.file_size_bytes,
-      checksum_sha256: payload.assets.original_wav.checksum_sha256,
-      access_level: "private",
-    },
-    {
-      sample_id: job.sample_id,
-      kind: "preview_audio",
-      bucket: payload.assets.preview_audio.bucket,
-      object_path: payload.assets.preview_audio.object_path,
-      mime_type: "audio/mpeg",
-      file_size_bytes: payload.assets.preview_audio.file_size_bytes,
-      checksum_sha256: payload.assets.preview_audio.checksum_sha256,
-      access_level: "public",
-    },
-    {
-      sample_id: job.sample_id,
-      kind: "waveform_peaks",
-      bucket: payload.assets.waveform_peaks.bucket,
-      object_path: payload.assets.waveform_peaks.object_path,
-      mime_type: "application/json",
-      file_size_bytes: payload.assets.waveform_peaks.file_size_bytes,
-      checksum_sha256: payload.assets.waveform_peaks.checksum_sha256,
-      access_level: "public",
-    },
-  ];
+  const assetRows = assetRowsForSucceededJob({ job, payload });
   const { error: assetsError } = await supabase
     .from("sample_assets")
     .upsert(assetRows, { onConflict: "sample_id,kind" });
@@ -416,22 +641,30 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
   }
 
   const finishedAt = now().toISOString();
+  const jobUpdate = {
+    status: "succeeded",
+    metadata: mergeJobMetadata(job.metadata, {
+      warnings: payload.warnings,
+      tool_versions: payload.tool_versions,
+      duplicate_check: payload.duplicate_check,
+      processing_duration_ms: payload.processing_duration_ms,
+    }),
+    finished_at: finishedAt,
+    last_error_code: null,
+    last_error_message: null,
+  };
+
+  if (payload.assets.preview_audio) {
+    jobUpdate.output_preview_path = payload.assets.preview_audio.object_path;
+  }
+
+  if (payload.assets.waveform_peaks) {
+    jobUpdate.output_waveform_path = payload.assets.waveform_peaks.object_path;
+  }
+
   const { error: jobError } = await supabase
     .from("processing_jobs")
-    .update({
-      status: "succeeded",
-      output_preview_path: payload.assets.preview_audio.object_path,
-      output_waveform_path: payload.assets.waveform_peaks.object_path,
-      metadata: mergeJobMetadata(job.metadata, {
-        warnings: payload.warnings,
-        tool_versions: payload.tool_versions,
-        duplicate_check: payload.duplicate_check,
-        processing_duration_ms: payload.processing_duration_ms,
-      }),
-      finished_at: finishedAt,
-      last_error_code: null,
-      last_error_message: null,
-    })
+    .update(jobUpdate)
     .eq("id", job.id);
 
   if (jobError) {
@@ -439,6 +672,10 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
       processing_job_id: job.id,
       db_error: jobError.message,
     });
+  }
+
+  if (job.job_type !== "initial_upload") {
+    return;
   }
 
   const { error: sampleError } = await supabase
@@ -460,6 +697,94 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
       processing_job_id: job.id,
       sample_id: job.sample_id,
       db_error: sampleError.message,
+    });
+  }
+}
+
+function assetRowsForSucceededJob({ job, payload }) {
+  if (job.job_type === "initial_upload") {
+    assertPayloadAsset(payload, "original_wav", job);
+    assertPayloadAsset(payload, "preview_audio", job);
+    assertPayloadAsset(payload, "waveform_peaks", job);
+
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "original_wav",
+        asset: payload.assets.original_wav,
+        mimeType: payload.source.mime_type ?? "audio/wav",
+        accessLevel: "private",
+      }),
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "preview_audio",
+        asset: payload.assets.preview_audio,
+        mimeType: "audio/mpeg",
+        accessLevel: "public",
+      }),
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "waveform_peaks",
+        asset: payload.assets.waveform_peaks,
+        mimeType: "application/json",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  if (job.job_type === "reprocess_preview") {
+    assertPayloadAsset(payload, "preview_audio", job);
+
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "preview_audio",
+        asset: payload.assets.preview_audio,
+        mimeType: "audio/mpeg",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  if (job.job_type === "reprocess_waveform") {
+    assertPayloadAsset(payload, "waveform_peaks", job);
+
+    return [
+      sampleAssetRow({
+        sampleId: job.sample_id,
+        kind: "waveform_peaks",
+        asset: payload.assets.waveform_peaks,
+        mimeType: "application/json",
+        accessLevel: "public",
+      }),
+    ];
+  }
+
+  throw new AudioProcessingError("DB_UPDATE_FAILED", "Unsupported audio processing job type.", {
+    processing_job_id: job.id,
+    job_type: job.job_type,
+  });
+}
+
+function sampleAssetRow({ sampleId, kind, asset, mimeType, accessLevel }) {
+  return {
+    sample_id: sampleId,
+    kind,
+    bucket: asset.bucket,
+    object_path: asset.object_path,
+    mime_type: mimeType,
+    file_size_bytes: asset.file_size_bytes,
+    checksum_sha256: asset.checksum_sha256,
+    access_level: accessLevel,
+  };
+}
+
+function assertPayloadAsset(payload, kind, job) {
+  if (!payload.assets?.[kind]) {
+    throw new AudioProcessingError("DB_UPDATE_FAILED", `Processing result is missing ${kind}.`, {
+      processing_job_id: job.id,
+      job_type: job.job_type,
+      asset_kind: kind,
     });
   }
 }
@@ -487,6 +812,96 @@ async function markProcessingJobFailed({ supabase, job, error, now = () => new D
   }
 
   await updateInitialUploadSampleStatus({ supabase, job: data, status: "failed", now });
+}
+
+export async function markStuckAudioJobsTimedOut({
+  supabase,
+  settings = {},
+  logger = () => {},
+  now = () => new Date(),
+  limit = 100,
+} = {}) {
+  const { data, error } = await supabase
+    .from("processing_jobs")
+    .select("*")
+    .in("job_type", AUDIO_JOB_TYPES)
+    .eq("status", "running")
+    .order("updated_at", { ascending: true })
+    .limit(limit);
+
+  if (error) {
+    logger("error", "audio_worker_stuck_job_lookup_failed", {
+      db_error: error.message,
+    });
+    return { timedOut: 0, checked: 0 };
+  }
+
+  let timedOut = 0;
+  const runningJobs = data ?? [];
+
+  for (const runningJob of runningJobs) {
+    if (!isAudioJobStuck(runningJob, { settings, now })) {
+      continue;
+    }
+
+    const finishedAt = now().toISOString();
+    const { data: timedOutJob, error: updateError } = await supabase
+      .from("processing_jobs")
+      .update({
+        status: "timed_out",
+        last_error_code: "WORKER_TIMEOUT",
+        last_error_message: "Worker exceeded allowed runtime.",
+        finished_at: finishedAt,
+      })
+      .eq("id", runningJob.id)
+      .eq("status", "running")
+      .select("*")
+      .maybeSingle();
+
+    if (updateError) {
+      logger("error", "audio_worker_stuck_job_timeout_failed", {
+        processing_job_id: runningJob.id,
+        db_error: updateError.message,
+      });
+      continue;
+    }
+
+    if (!timedOutJob) {
+      continue;
+    }
+
+    timedOut += 1;
+    await updateInitialUploadSampleStatus({ supabase, job: timedOutJob, status: "failed", now });
+  }
+
+  if (timedOut > 0) {
+    logger("info", "audio_worker_stuck_jobs_timed_out", {
+      timed_out: timedOut,
+      checked: runningJobs.length,
+    });
+  }
+
+  return { timedOut, checked: runningJobs.length };
+}
+
+export function isAudioJobStuck(job, { settings = {}, now = () => new Date() } = {}) {
+  if (job.status !== "running") {
+    return false;
+  }
+
+  const referenceTime = Date.parse(job.updated_at ?? job.started_at ?? "");
+
+  if (!Number.isFinite(referenceTime)) {
+    return false;
+  }
+
+  const maxDurationSeconds = Number(settings.maxDurationSeconds ?? settings.max_duration_seconds ?? 1800);
+  const thresholdMs = Math.max(
+    MIN_STUCK_JOB_AGE_MS,
+    Number.isFinite(maxDurationSeconds) ? (maxDurationSeconds * 1000) / 2 : MIN_STUCK_JOB_AGE_MS,
+  );
+
+  return now().getTime() - referenceTime > thresholdMs;
 }
 
 async function updateInitialUploadSampleStatus({ supabase, job, status, now = () => new Date() }) {
@@ -528,11 +943,11 @@ async function fetchProcessingJob({ supabase, processingJobId }) {
   return data;
 }
 
-async function fetchNextQueuedInitialUploadJob({ supabase }) {
+async function fetchNextQueuedAudioJob({ supabase }) {
   const { data, error } = await supabase
     .from("processing_jobs")
     .select("*")
-    .eq("job_type", "initial_upload")
+    .in("job_type", AUDIO_JOB_TYPES)
     .eq("status", "queued")
     .order("created_at", { ascending: true })
     .limit(1)
@@ -541,6 +956,30 @@ async function fetchNextQueuedInitialUploadJob({ supabase }) {
   if (error) {
     throw new AudioProcessingError("DB_UPDATE_FAILED", "Unable to load the next queued processing job.", {
       db_error: error.message,
+    });
+  }
+
+  return data;
+}
+
+async function fetchOriginalWavAsset({ supabase, sampleId }) {
+  const { data, error } = await supabase
+    .from("sample_assets")
+    .select("*")
+    .eq("sample_id", sampleId)
+    .eq("kind", "original_wav")
+    .maybeSingle();
+
+  if (error) {
+    throw new AudioProcessingError("DB_UPDATE_FAILED", "Unable to load original WAV asset.", {
+      sample_id: sampleId,
+      db_error: error.message,
+    });
+  }
+
+  if (!data?.bucket || !data?.object_path) {
+    throw new AudioProcessingError("SOURCE_NOT_FOUND", "Original WAV asset is missing.", {
+      sample_id: sampleId,
     });
   }
 

@@ -112,6 +112,12 @@ async function loadUploadSessionsModule() {
         .max(120)
         .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/),
     },
+    "@/lib/storage-paths": {
+      bulkIntakeUploadRef: ({ batchId, sampleId }) => ({
+        bucket: "ais-processing-temp",
+        objectPath: `intake/batches/${batchId}/${sampleId}/source.wav`,
+      }),
+    },
   });
 }
 
@@ -126,6 +132,13 @@ async function loadProcessingJobsModule() {
     "@/lib/supabase/admin": {
       createSupabaseAdminClient() {
         throw new Error("tests inject a recording Supabase client");
+      },
+    },
+    "@/lib/storage": {
+      createStorageProvider() {
+        return {
+          exists: async () => true,
+        };
       },
     },
   });
@@ -553,6 +566,68 @@ test("successful processing moves the sample to needs_review", async () => {
   assert.equal(updatedJob.output_waveform_path, "samples/sample-1/waveform/job-1.json");
   assert.equal(sampleUpdates.at(-1).payload.status, "needs_review");
   assert.equal(supabase.state.samples.get("sample-1").status, "needs_review");
+});
+
+test("reprocess preview swaps only the preview asset after success", async () => {
+  const jobs = await loadProcessingJobsModule();
+  const supabase = createRecordingSupabase({
+    job: initialUploadJob({ job_type: "reprocess_preview" }),
+    sample: draftSample({ status: "published" }),
+  });
+
+  const updatedJob = await jobs.markProcessingJobSucceeded(
+    "job-1",
+    successPayload({
+      assets: {
+        preview_audio: {
+          bucket: "ais-previews",
+          object_path: "samples/sample-1/preview/job-1.mp3",
+          file_size_bytes: 23456,
+          checksum_sha256: "b".repeat(64),
+        },
+      },
+    }),
+    { supabase, now: fixedNow },
+  );
+  const assetWrite = supabase.calls.find((call) => call.table === "sample_assets" && call.method === "upsert");
+  const sampleUpdates = supabase.calls.filter((call) => call.table === "samples" && call.method === "update");
+
+  assert.equal(updatedJob.status, "succeeded");
+  assert.equal(updatedJob.output_preview_path, "samples/sample-1/preview/job-1.mp3");
+  assert.deepEqual(assetWrite.rows.map((row) => row.kind), ["preview_audio"]);
+  assert.equal(supabase.state.samples.get("sample-1").status, "published");
+  assert.equal(sampleUpdates.length, 0);
+});
+
+test("reprocess waveform swaps only the waveform asset after success", async () => {
+  const jobs = await loadProcessingJobsModule();
+  const supabase = createRecordingSupabase({
+    job: initialUploadJob({ job_type: "reprocess_waveform" }),
+    sample: draftSample({ status: "published" }),
+  });
+
+  const updatedJob = await jobs.markProcessingJobSucceeded(
+    "job-1",
+    successPayload({
+      assets: {
+        waveform_peaks: {
+          bucket: "ais-waveforms",
+          object_path: "samples/sample-1/waveform/job-1.json",
+          file_size_bytes: 3456,
+          checksum_sha256: "c".repeat(64),
+        },
+      },
+    }),
+    { supabase, now: fixedNow },
+  );
+  const assetWrite = supabase.calls.find((call) => call.table === "sample_assets" && call.method === "upsert");
+  const sampleUpdates = supabase.calls.filter((call) => call.table === "samples" && call.method === "update");
+
+  assert.equal(updatedJob.status, "succeeded");
+  assert.equal(updatedJob.output_waveform_path, "samples/sample-1/waveform/job-1.json");
+  assert.deepEqual(assetWrite.rows.map((row) => row.kind), ["waveform_peaks"]);
+  assert.equal(supabase.state.samples.get("sample-1").status, "published");
+  assert.equal(sampleUpdates.length, 0);
 });
 
 test("failed initial upload processing marks the sample failed", async () => {

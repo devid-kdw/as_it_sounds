@@ -30,6 +30,22 @@ export type UploadSessionCreateRequest = {
   bulk_position?: number | null;
 };
 
+export type UploadSessionCreateFileInput = {
+  client_file_id?: string | null;
+  filename: string;
+  content_type: string;
+  file_size_bytes: number;
+};
+
+export type UploadSessionsCreateRequest = {
+  mode: UploadSessionMode;
+  files: UploadSessionCreateFileInput[];
+  initial_category_slug: string;
+  initial_sample_type_slug: string;
+  initial_bpm?: number | null;
+  album_id?: string | null;
+};
+
 export type SignedUploadResponse = {
   url: string;
   token: string | null;
@@ -46,6 +62,19 @@ export type UploadSessionCreateResponse = {
 
 export type UploadSessionCreateApiResponse = ApiResponse<UploadSessionCreateResponse>;
 
+export type UploadSessionBatchItemResponse = UploadSessionCreateResponse & {
+  client_file_id: string | null;
+  bulk_position: number;
+  original_filename: string;
+};
+
+export type UploadSessionsCreateResponse = {
+  batch_id: string | null;
+  sessions: UploadSessionBatchItemResponse[];
+};
+
+export type UploadSessionsCreateApiResponse = ApiResponse<UploadSessionsCreateResponse>;
+
 export type UploadSessionFinalizeRequest = {
   mode?: "single";
   sample_id: string;
@@ -61,6 +90,52 @@ export type UploadSessionFinalizeResponse = {
 };
 
 export type UploadSessionFinalizeApiResponse = ApiResponse<UploadSessionFinalizeResponse>;
+
+export type BulkUploadFinalizeRequest = {
+  batch_id: string;
+  processing_job_ids?: string[];
+};
+
+export type BulkUploadFinalizeResponse = {
+  batch_id: string;
+  finalized_count: number;
+  sessions: UploadSessionFinalizeResponse[];
+};
+
+export type BulkUploadStatusRow = {
+  batch_id: string;
+  client_file_id: string | null;
+  bulk_position: number | null;
+  original_filename: string | null;
+  sample_id: string;
+  processing_job_id: string;
+  upload_finalized_at: string | null;
+  processing_status: ProcessingJobStatus;
+  sample_status: SampleStatus;
+  job_type: ProcessingJobType;
+  attempts: number;
+  max_attempts: number;
+  retry_eligible: boolean;
+  retry_reason: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  duplicate_check: unknown;
+  warnings: unknown;
+  asset_status: Array<{
+    kind: "original_wav" | "preview_audio" | "waveform_peaks";
+    status: "present" | "missing_row";
+    access_level: string | null;
+  }>;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+export type BulkUploadStatusResponse = {
+  batch_id: string;
+  rows: BulkUploadStatusRow[];
+};
 
 export type ProcessingJobRetryResponse = {
   processing_job_id: string;
@@ -97,6 +172,7 @@ export type ProcessingJobStatusResponse = {
 export type ProcessingJobStatusApiResponse = ApiResponse<ProcessingJobStatusResponse>;
 
 export type SampleStatus = Database["public"]["Enums"]["sample_status"];
+export type AlbumStatus = Database["public"]["Enums"]["album_status"];
 export type LicenseStatus = Database["public"]["Enums"]["license_status"];
 export type SourceType = Database["public"]["Enums"]["source_type"];
 export type ProcessingJobStatus = Database["public"]["Enums"]["processing_job_status"];
@@ -266,3 +342,144 @@ export type AdminSampleActionResponse = {
 };
 
 export type AdminSampleActionApiResponse = ApiResponse<AdminSampleActionResponse>;
+
+export type AdminSampleListFilters = {
+  status?: SampleStatus | "all";
+  processing_status?: ProcessingJobStatus | "all";
+  category_slug?: string;
+  sample_type_slug?: string;
+  mood_slug?: string;
+  license_status?: LicenseStatus | "all";
+  featured?: boolean;
+  duplicate_warning?: boolean;
+  missing_asset?: "any" | "original_wav" | "preview_audio" | "waveform_peaks";
+  album_id?: string;
+  publish_eligibility?: "eligible" | "blocked";
+  query?: string;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminSampleListItem = {
+  id: string;
+  poetic_name: string;
+  display_title: string;
+  short_description: string | null;
+  status: SampleStatus;
+  category_slug: string;
+  sample_type_slug: string;
+  license_status: LicenseStatus;
+  bpm: number | null;
+  duration_seconds: number | null;
+  featured: boolean;
+  published_at: string | null;
+  updated_at: string;
+  original_filename: string | null;
+  mood_slugs: string[];
+  album_ids: string[];
+  asset_status: Array<{
+    kind: "original_wav" | "preview_audio" | "waveform_peaks";
+    status: "present" | "missing_row";
+    access_level: string | null;
+  }>;
+  latest_processing_job: AdminSampleProcessingJobSummary | null;
+  duplicate_warning: {
+    present: boolean;
+    acknowledged: boolean;
+    matching_sample_ids: string[];
+  };
+  publish_eligibility: Pick<PublishEligibility, "can_publish" | "blockers" | "warnings">;
+};
+
+export type AdminSampleListResponse = {
+  filters: AdminSampleListFilters;
+  items: AdminSampleListItem[];
+  limit: number;
+  offset: number;
+};
+
+export type AdminProcessingJobListFilters = {
+  status?: ProcessingJobStatus | "all";
+  job_type?: ProcessingJobType | "all";
+  batch_id?: string;
+  stuck?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export type AdminProcessingJobListItem = {
+  id: string;
+  sample_id: string | null;
+  sample_poetic_name: string | null;
+  sample_display_title: string | null;
+  sample_status: SampleStatus | null;
+  original_filename: string | null;
+  batch_id: string | null;
+  bulk_position: number | null;
+  job_type: ProcessingJobType;
+  status: ProcessingJobStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  retry_eligible: boolean;
+  retry_reason: string | null;
+  is_stuck: boolean;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminProcessingJobListResponse = {
+  filters: AdminProcessingJobListFilters;
+  items: AdminProcessingJobListItem[];
+  limit: number;
+  offset: number;
+};
+
+export type AdminProcessingStuckResponse = {
+  timed_out_count: number;
+  jobs: AdminProcessingJobListItem[];
+};
+
+export type AdminReprocessJobResponse = {
+  sample_id: string;
+  processing_job_id: string;
+  job_type: "reprocess_preview" | "reprocess_waveform";
+  status: "queued";
+};
+
+export type AdminAlbumListItem = {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  status: AlbumStatus;
+  cover_image_path: string | null;
+  sample_count: number;
+  published_at: string | null;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminAlbumSampleItem = {
+  album_id: string;
+  sample_id: string;
+  sort_order: number;
+  poetic_name: string;
+  display_title: string;
+  status: SampleStatus;
+};
+
+export type AdminAlbumDetailResponse = {
+  album: AdminAlbumListItem;
+  samples: AdminAlbumSampleItem[];
+};
+
+export type AdminAlbumListResponse = {
+  albums: AdminAlbumListItem[];
+};
+
+export type AdminAlbumMutationResponse = AdminAlbumDetailResponse;

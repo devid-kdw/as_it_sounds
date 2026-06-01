@@ -79,6 +79,13 @@ test("processing job retry eligibility follows PIPE-10 and PIPE-21 terminal rule
         throw new Error("database client should not be needed for pure eligibility tests");
       },
     },
+    "@/lib/storage": {
+      createStorageProvider() {
+        return {
+          exists: async () => true,
+        };
+      },
+    },
   });
   const baseJob = {
     id: "job-id",
@@ -147,6 +154,12 @@ test("upload session contract rejects non-WAV and invalid draft sample inputs", 
         .min(1)
         .max(120)
         .regex(/^[a-z0-9]+(?:_[a-z0-9]+)*$/),
+    },
+    "@/lib/storage-paths": {
+      bulkIntakeUploadRef: ({ batchId, sampleId }) => ({
+        bucket: "ais-processing-temp",
+        objectPath: `intake/batches/${batchId}/${sampleId}/source.wav`,
+      }),
     },
   });
   const validRequest = {

@@ -2,33 +2,20 @@ import { NextResponse } from "next/server";
 import { requireAdminApi } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import {
-  createUploadSessions,
-  createSingleUploadSession,
-  parseUploadSessionCreateRequest,
-  parseUploadSessionsCreateRequest,
+  finalizeBulkUploadSessions,
+  parseBulkUploadFinalizeRequest,
 } from "@/lib/upload-sessions";
 
 export async function POST(request: Request) {
   try {
     const { user } = await requireAdminApi();
     const payload = await parseJsonBody(request);
-
-    if (isBatchUploadPayload(payload)) {
-      const uploadRequest = parseUploadSessionsCreateRequest(payload);
-      const uploadSessions = await createUploadSessions(uploadRequest, { userId: user.id });
-
-      return NextResponse.json({
-        ok: true,
-        data: uploadSessions,
-      });
-    }
-
-    const uploadRequest = parseUploadSessionCreateRequest(payload);
-    const uploadSession = await createSingleUploadSession(uploadRequest, { userId: user.id });
+    const finalizeRequest = parseBulkUploadFinalizeRequest(payload);
+    const result = await finalizeBulkUploadSessions(finalizeRequest, { userId: user.id });
 
     return NextResponse.json({
       ok: true,
-      data: uploadSession,
+      data: result,
     });
   } catch (error) {
     if (error instanceof AISUserSafeError) {
@@ -45,8 +32,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: false,
-        code: "upload_session_request_failed",
-        message: "Unable to validate the upload session request.",
+        code: "bulk_upload_finalize_failed",
+        message: "Unable to finalize the bulk upload session.",
       },
       { status: 500 },
     );
@@ -59,12 +46,4 @@ async function parseJsonBody(request: Request) {
   } catch {
     throw new AISUserSafeError("Request body must be valid JSON.", "invalid_json_body", 400);
   }
-}
-
-function isBatchUploadPayload(payload: unknown) {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    ("files" in payload || ("mode" in payload && payload.mode === "bulk"))
-  );
 }
