@@ -1,15 +1,18 @@
 export const sampleCategories = [
-  "texture",
-  "loop",
-  "one-shot",
-  "field-recording",
-  "foley",
-  "melodic",
-  "percussion",
+  "field_recordings",
+  "loops",
+  "textures",
+  "drones",
+  "percussive",
+  "one_shots",
+  "processed",
 ] as const;
 
 export const sampleTypes = [
-  "preview",
-  "original",
-  "waveform-peaks",
+  "loop",
+  "one_shot",
+  "field_recording",
+  "texture",
+  "drone",
+  "processed",
 ] as const;

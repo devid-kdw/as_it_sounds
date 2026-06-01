@@ -1,34 +1,34 @@
 export type MoodToken =
+  | "melancholic"
+  | "tense"
+  | "peaceful"
+  | "mysterious"
+  | "euphoric"
+  | "dark"
+  | "organic"
+  | "industrial"
+  | "fragile"
+  | "ritual"
+  | "distant"
   | "warm"
   | "cold"
-  | "lonely"
-  | "hopeful"
-  | "tense"
-  | "calm"
-  | "eerie"
-  | "nostalgic"
-  | "heavy"
-  | "light"
-  | "organic"
-  | "mechanical"
-  | "distant"
-  | "intimate"
-  | "ritual";
+  | "haunted"
+  | "intimate";
 
 export const primaryMoods: MoodToken[] = [
+  "melancholic",
+  "tense",
+  "peaceful",
+  "mysterious",
+  "euphoric",
+  "dark",
+  "organic",
+  "industrial",
+  "fragile",
+  "ritual",
+  "distant",
   "warm",
   "cold",
-  "lonely",
-  "hopeful",
-  "tense",
-  "calm",
-  "eerie",
-  "nostalgic",
-  "heavy",
-  "light",
-  "organic",
-  "mechanical",
-  "distant",
+  "haunted",
   "intimate",
-  "ritual",
 ];

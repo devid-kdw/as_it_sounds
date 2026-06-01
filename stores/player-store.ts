@@ -8,9 +8,10 @@ export type PlayerSampleInput = {
   sampleId: string;
   poeticName: string;
   title: string;
-  previewUrl: string;
-  peaksUrl: string;
+  previewUrl: string | null;
+  peaksUrl: string | null;
   durationSeconds: number | null;
+  loopable: boolean;
   sourceSurface: PlayerSurface;
 };
 
@@ -20,6 +21,7 @@ export type PlayerState = {
   activeTitle: string | null;
   activePreviewUrl: string | null;
   activePeaksUrl: string | null;
+  activeLoopable: boolean;
   durationSeconds: number | null;
   currentTime: number;
   isPlaying: boolean;
@@ -34,6 +36,8 @@ export type PlayerState = {
   pause: () => void;
   stop: () => void;
   seek: (timeSeconds: number) => void;
+  setCurrentTime: (timeSeconds: number) => void;
+  setLoading: (loading: boolean) => void;
   setVolume: (volume: number) => void;
   setLooping: (looping: boolean) => void;
   setError: (message: string | null) => void;
@@ -45,6 +49,7 @@ export const usePlayerStore = create<PlayerState>((set) => ({
   activeTitle: null,
   activePreviewUrl: null,
   activePeaksUrl: null,
+  activeLoopable: false,
   durationSeconds: null,
   currentTime: 0,
   isPlaying: false,
@@ -61,9 +66,11 @@ export const usePlayerStore = create<PlayerState>((set) => ({
       activeTitle: sample.title,
       activePreviewUrl: sample.previewUrl,
       activePeaksUrl: sample.peaksUrl,
+      activeLoopable: sample.loopable,
       durationSeconds: sample.durationSeconds,
       currentTime: 0,
-      isLoading: true,
+      isLoading: false,
+      isLooping: sample.loopable ? state.isLooping : false,
       error: null,
       sourceSurface: sample.sourceSurface,
       recentlyPlayedIds: [
@@ -71,11 +78,13 @@ export const usePlayerStore = create<PlayerState>((set) => ({
         ...state.recentlyPlayedIds.filter((id) => id !== sample.sampleId),
       ].slice(0, 20),
     })),
-  play: () => set({ isPlaying: true, isLoading: false }),
+  play: () => set({ isPlaying: true, isLoading: true, error: null }),
   pause: () => set({ isPlaying: false }),
   stop: () => set({ isPlaying: false, currentTime: 0 }),
   seek: (timeSeconds) => set({ currentTime: Math.max(0, timeSeconds) }),
+  setCurrentTime: (timeSeconds) => set({ currentTime: Math.max(0, timeSeconds) }),
+  setLoading: (isLoading) => set({ isLoading }),
   setVolume: (volume) => set({ volume: Math.min(1, Math.max(0, volume)) }),
-  setLooping: (isLooping) => set({ isLooping }),
-  setError: (error) => set({ error, isLoading: false }),
+  setLooping: (isLooping) => set((state) => ({ isLooping: state.activeLoopable ? isLooping : false })),
+  setError: (error) => set({ error, isLoading: false, isPlaying: false }),
 }));
