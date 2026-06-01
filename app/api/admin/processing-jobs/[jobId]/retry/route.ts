@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import { queueProcessingJobRetry } from "@/lib/processing-jobs";
 
@@ -10,11 +10,10 @@ type RetryRouteContext = {
 };
 
 export async function POST(_request: Request, context: RetryRouteContext) {
-  await requireAdmin("/admin/processing");
-
   try {
+    const { user } = await requireAdminApi();
     const { jobId } = await context.params;
-    const result = await queueProcessingJobRetry(jobId, "admin");
+    const result = await queueProcessingJobRetry(jobId, "admin", { actorUserId: user.id });
 
     if (!result.queued) {
       return NextResponse.json(

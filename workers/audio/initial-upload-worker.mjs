@@ -415,27 +415,6 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
     });
   }
 
-  const { error: sampleError } = await supabase
-    .from("samples")
-    .update({
-      file_hash_sha256: payload.source.sha256,
-      file_size_bytes: payload.source.file_size_bytes,
-      duration_seconds: payload.source.duration_seconds,
-      sample_rate: payload.source.sample_rate,
-      bit_depth: payload.source.bit_depth,
-      channels: payload.source.channels,
-      failed_at: null,
-    })
-    .eq("id", job.sample_id);
-
-  if (sampleError) {
-    throw new AudioProcessingError("DB_UPDATE_FAILED", "Unable to save processing metadata.", {
-      processing_job_id: job.id,
-      sample_id: job.sample_id,
-      db_error: sampleError.message,
-    });
-  }
-
   const finishedAt = now().toISOString();
   const { error: jobError } = await supabase
     .from("processing_jobs")
@@ -462,16 +441,25 @@ async function markProcessingJobSucceeded({ supabase, job, payload, now = () => 
     });
   }
 
-  const { error: reviewStatusError } = await supabase
+  const { error: sampleError } = await supabase
     .from("samples")
-    .update({ status: "needs_review", failed_at: null })
+    .update({
+      status: "needs_review",
+      file_hash_sha256: payload.source.sha256,
+      file_size_bytes: payload.source.file_size_bytes,
+      duration_seconds: payload.source.duration_seconds,
+      sample_rate: payload.source.sample_rate,
+      bit_depth: payload.source.bit_depth,
+      channels: payload.source.channels,
+      failed_at: null,
+    })
     .eq("id", job.sample_id);
 
-  if (reviewStatusError) {
-    throw new AudioProcessingError("DB_UPDATE_FAILED", "Unable to move the sample to review.", {
+  if (sampleError) {
+    throw new AudioProcessingError("DB_UPDATE_FAILED", "Unable to save processing metadata.", {
       processing_job_id: job.id,
       sample_id: job.sample_id,
-      db_error: reviewStatusError.message,
+      db_error: sampleError.message,
     });
   }
 }
@@ -908,4 +896,3 @@ function commandTimeoutMs(settings) {
 function isStorageNotFoundError(error) {
   return /not found|does not exist|404/i.test(`${error.message ?? ""} ${error.statusCode ?? ""} ${error.status ?? ""}`);
 }
-

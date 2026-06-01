@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import {
   createSingleUploadSession,
@@ -7,9 +7,8 @@ import {
 } from "@/lib/upload-sessions";
 
 export async function POST(request: Request) {
-  const { user } = await requireAdmin("/admin/upload");
-
   try {
+    const { user } = await requireAdminApi();
     const payload = await parseJsonBody(request);
     const uploadRequest = parseUploadSessionCreateRequest(payload);
 

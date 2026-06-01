@@ -15,6 +15,7 @@ import {
   type PipelineErrorInput,
   toSafePipelineError,
 } from "@/lib/errors";
+import { tryWriteAdminAuditLog } from "@/lib/admin-audit";
 
 export type ProcessingJobRow = PublicTableRow<"processing_jobs">;
 export type ProcessingJobStatus = ProcessingJobRow["status"];
@@ -78,6 +79,7 @@ export type ProcessingJobClaimResult =
 type ProcessingJobServiceOptions = {
   supabase?: SupabaseDatabaseClient;
   now?: () => Date;
+  actorUserId?: string | null;
 };
 
 const RETRYABLE_TERMINAL_STATUSES: ProcessingJobStatus[] = ["failed", "canceled", "timed_out"];
@@ -120,6 +122,9 @@ export async function getProcessingJobStatusSnapshot(
   const sampleStatus = job.sample_id
     ? await getSampleProcessingStatus(supabase, job.sample_id)
     : null;
+  const assetStatus = job.sample_id
+    ? await getProcessingAssetStatus(supabase, job.sample_id)
+    : [];
   const retryEligibility = determineProcessingJobRetryEligibility(job, "admin");
 
   return {
@@ -138,6 +143,9 @@ export async function getProcessingJobStatusSnapshot(
     finished_at: job.finished_at,
     created_at: job.created_at,
     updated_at: job.updated_at,
+    warnings: getJobMetadataValue(job.metadata, "warnings"),
+    duplicate_check: getJobMetadataValue(job.metadata, "duplicate_check"),
+    asset_status: assetStatus,
   };
 }
 
@@ -291,29 +299,6 @@ export async function markProcessingJobSucceeded(
     throw new AISUserSafeError("Unable to save generated sample assets.", "processing_assets_update_failed", 500);
   }
 
-  const sampleMetadataUpdate: PublicTableUpdate<"samples"> = {
-    file_hash_sha256: payload.source.sha256,
-    file_size_bytes: payload.source.file_size_bytes,
-    duration_seconds: payload.source.duration_seconds,
-    sample_rate: payload.source.sample_rate,
-    bit_depth: payload.source.bit_depth,
-    channels: payload.source.channels,
-    failed_at: null,
-  };
-  const { error: sampleError } = await supabase
-    .from("samples")
-    .update(sampleMetadataUpdate)
-    .eq("id", job.sample_id);
-
-  if (sampleError) {
-    await markProcessingJobFailed(
-      job.id,
-      { code: "DB_UPDATE_FAILED" },
-      { ...options, supabase },
-    );
-    throw new AISUserSafeError("Unable to save processing metadata.", "processing_sample_update_failed", 500);
-  }
-
   const jobUpdate: PublicTableUpdate<"processing_jobs"> = {
     status: "succeeded",
     output_preview_path: payload.assets.preview_audio.object_path,
@@ -339,18 +324,28 @@ export async function markProcessingJobSucceeded(
     throw new AISUserSafeError("Unable to mark the processing job as succeeded.", "processing_job_update_failed", 500);
   }
 
-  const { error: reviewStatusError } = await supabase
+  const sampleSuccessUpdate: PublicTableUpdate<"samples"> = {
+    status: "needs_review",
+    file_hash_sha256: payload.source.sha256,
+    file_size_bytes: payload.source.file_size_bytes,
+    duration_seconds: payload.source.duration_seconds,
+    sample_rate: payload.source.sample_rate,
+    bit_depth: payload.source.bit_depth,
+    channels: payload.source.channels,
+    failed_at: null,
+  };
+  const { error: sampleError } = await supabase
     .from("samples")
-    .update({ status: "needs_review" })
+    .update(sampleSuccessUpdate)
     .eq("id", job.sample_id);
 
-  if (reviewStatusError) {
+  if (sampleError) {
     await markProcessingJobFailed(
       job.id,
       { code: "DB_UPDATE_FAILED" },
       { ...options, supabase },
     );
-    throw new AISUserSafeError("Unable to move the sample to review.", "processing_sample_update_failed", 500);
+    throw new AISUserSafeError("Unable to save processing metadata.", "processing_sample_update_failed", 500);
   }
 
   return data;
@@ -484,6 +479,22 @@ export async function queueProcessingJobRetry(
   }
 
   await updateInitialUploadSampleStatus(supabase, data, "draft", getNowIso(options));
+  await tryWriteAdminAuditLog(supabase, {
+    actorUserId: options.actorUserId ?? null,
+    action: "processing_job.retry",
+    entityType: "processing_job",
+    entityId: job.id,
+    beforeData: {
+      status: job.status,
+      attempts: job.attempts,
+      last_error_code: job.last_error_code,
+    },
+    afterData: {
+      status: data.status,
+      attempts: data.attempts,
+      sample_id: data.sample_id,
+    },
+  });
 
   return {
     queued: true,
@@ -558,6 +569,33 @@ async function getSampleProcessingStatus(
   return data.status;
 }
 
+async function getProcessingAssetStatus(
+  supabase: SupabaseDatabaseClient,
+  sampleId: string,
+) {
+  const requiredKinds = ["original_wav", "preview_audio", "waveform_peaks"] as const;
+  const { data, error } = await supabase
+    .from("sample_assets")
+    .select("kind,access_level")
+    .eq("sample_id", sampleId);
+
+  if (error) {
+    throw new AISUserSafeError("Unable to load generated asset status.", "processing_asset_status_failed", 500);
+  }
+
+  const rowsByKind = new Map((data ?? []).map((asset) => [asset.kind, asset]));
+
+  return requiredKinds.map((kind) => {
+    const asset = rowsByKind.get(kind);
+
+    return {
+      kind,
+      status: asset ? "present" as const : "missing_row" as const,
+      access_level: asset?.access_level ?? null,
+    };
+  });
+}
+
 async function updateInitialUploadSampleStatus(
   supabase: SupabaseDatabaseClient,
   job: Pick<ProcessingJobRow, "job_type" | "sample_id">,
@@ -602,6 +640,15 @@ function mergeJobMetadata(
   }
 
   return merged;
+}
+
+function getJobMetadataValue(metadata: Json, key: string): Json | null {
+  if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const value = metadata[key];
+  return value === undefined ? null : value;
 }
 
 function getSupabase(options: ProcessingJobServiceOptions) {

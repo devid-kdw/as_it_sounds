@@ -85,7 +85,7 @@ test("signed upload session responses are scoped and never include service role 
   const uploadSessions = await source("lib/upload-sessions.ts").catch(() => "");
   const combined = `${route}\n${uploadSessions}`;
 
-  assert.match(route, /requireAdmin/);
+  assert.match(route, /requireAdminApi/);
   assertNoServiceRoleLeak(combined, "admin upload session route/helpers");
 
   if (uploadSessions) {

@@ -80,6 +80,13 @@ export type ProcessingJobStatusResponse = {
   finished_at: string | null;
   created_at: string;
   updated_at: string;
+  warnings: unknown;
+  duplicate_check: unknown;
+  asset_status: Array<{
+    kind: string;
+    status: "present" | "missing_row";
+    access_level: string | null;
+  }>;
 };
 
 export type ProcessingJobStatusApiResponse = ApiResponse<ProcessingJobStatusResponse>;

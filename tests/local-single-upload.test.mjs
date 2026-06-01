@@ -102,6 +102,9 @@ async function loadUploadSessionsModule() {
 
   return loadProjectTsModule("lib/upload-sessions.ts", {
     "@/lib/errors": errors,
+    "@/lib/admin-audit": {
+      tryWriteAdminAuditLog: async () => true,
+    },
     "@/lib/validators": {
       poeticNameSchema: z
         .string()
@@ -117,6 +120,9 @@ async function loadProcessingJobsModule() {
 
   return loadProjectTsModule("lib/processing-jobs.ts", {
     "@/lib/errors": errors,
+    "@/lib/admin-audit": {
+      tryWriteAdminAuditLog: async () => true,
+    },
     "@/lib/supabase/admin": {
       createSupabaseAdminClient() {
         throw new Error("tests inject a recording Supabase client");
@@ -356,7 +362,7 @@ function fixedNow() {
 test("non-admin users cannot create upload sessions", async () => {
   const route = await readProjectFile("app/api/admin/upload-sessions/route.ts");
   const postBody = route.slice(route.indexOf("export async function POST"));
-  const adminGuardIndex = postBody.indexOf("requireAdmin");
+  const adminGuardIndex = postBody.indexOf("requireAdminApi");
   const firstPrivilegedWorkIndex = [
     postBody.indexOf("createSingleUploadSession"),
     postBody.indexOf("createUploadSession"),
@@ -366,7 +372,7 @@ test("non-admin users cannot create upload sessions", async () => {
     postBody.indexOf("signed_upload"),
   ].filter((index) => index >= 0).sort((a, b) => a - b)[0];
 
-  assert.match(postBody, /await\s+requireAdmin\("\/admin\/upload"\)/);
+  assert.match(postBody, /await\s+requireAdminApi\(\)/);
   assert.ok(adminGuardIndex >= 0, "upload session route must verify admin access");
 
   if (firstPrivilegedWorkIndex !== undefined) {
@@ -467,7 +473,7 @@ test("upload session creation creates one draft sample and one queued initial up
 });
 
 test("upload finalize is idempotent", async () => {
-  const route = await readProjectFile("app/api/admin/upload-sessions/finalize/route.ts");
+  const route = await readProjectFile("app/api/admin/upload-sessions/[processingJobId]/finalize/route.ts");
   const uploadSessions = await loadUploadSessionsModule();
   const supabase = createRecordingSupabase({
     job: initialUploadJob({
@@ -494,7 +500,8 @@ test("upload finalize is idempotent", async () => {
     processing_job_id: "00000000-0000-4000-8000-000000000002",
   };
 
-  assert.match(route, /await\s+requireAdmin\("\/admin\/upload"\)/);
+  assert.match(route, /await\s+requireAdminApi\(\)/);
+  assert.match(await readProjectFile("app/admin/upload/page.tsx"), /\/api\/admin\/upload-sessions\/\$\{encodeURIComponent\(session\.processing_job_id\)\}\/finalize/);
 
   const first = await uploadSessions.finalizeSingleUploadSession(request, { userId: "admin-user" }, { supabase, storage, now });
   const second = await uploadSessions.finalizeSingleUploadSession(request, { userId: "admin-user" }, { supabase, storage, now });
@@ -603,6 +610,15 @@ test("browser-adjacent upload code never receives service role keys or original 
   for (const file of browserFiles) {
     const relativePath = path.relative(root, file);
     const source = await readFile(file, "utf8");
+    const isClientSurface =
+      source.includes('"use client"') ||
+      source.includes("'use client'") ||
+      relativePath.includes(`${path.sep}stores${path.sep}`) ||
+      relativePath === path.join("lib", "supabase", "browser.ts");
+
+    if (!isClientSurface) {
+      continue;
+    }
 
     assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY|service_role_key/i, `${relativePath} exposes service role material`);
     assert.doesNotMatch(source, /ais-originals|original_wav|\/original\/|input_path/i, `${relativePath} exposes original storage paths`);

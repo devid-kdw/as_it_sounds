@@ -71,6 +71,9 @@ test("processing job retry eligibility follows PIPE-10 and PIPE-21 terminal rule
   const errors = await loadProjectTsModule("lib/errors.ts");
   const jobs = await loadProjectTsModule("lib/processing-jobs.ts", {
     "@/lib/errors": errors,
+    "@/lib/admin-audit": {
+      tryWriteAdminAuditLog: async () => true,
+    },
     "@/lib/supabase/admin": {
       createSupabaseAdminClient() {
         throw new Error("database client should not be needed for pure eligibility tests");
@@ -135,6 +138,9 @@ test("upload session contract rejects non-WAV and invalid draft sample inputs", 
   const errors = await loadProjectTsModule("lib/errors.ts");
   const uploadSessions = await loadProjectTsModule("lib/upload-sessions.ts", {
     "@/lib/errors": errors,
+    "@/lib/admin-audit": {
+      tryWriteAdminAuditLog: async () => true,
+    },
     "@/lib/validators": {
       poeticNameSchema: z
         .string()
@@ -183,12 +189,12 @@ test("admin upload and retry routes keep the server-side admin guard", async () 
   const uploadRoute = await readProjectFile("app/api/admin/upload-sessions/route.ts");
   const retryRoute = await readProjectFile("app/api/admin/processing-jobs/[jobId]/retry/route.ts");
 
-  assert.match(uploadRoute, /requireAdmin\("\/admin\/upload"\)/);
+  assert.match(uploadRoute, /requireAdminApi\(\)/);
   assert.match(uploadRoute, /parseUploadSessionCreateRequest/);
   assert.ok(
-    uploadRoute.indexOf("requireAdmin") < uploadRoute.indexOf("parseUploadSessionCreateRequest"),
+    uploadRoute.indexOf("requireAdminApi") < uploadRoute.indexOf("parseUploadSessionCreateRequest"),
     "upload route must check admin before validating upload payloads",
   );
-  assert.match(retryRoute, /requireAdmin\("\/admin\/processing"\)/);
+  assert.match(retryRoute, /requireAdminApi\(\)/);
   assert.match(retryRoute, /queueProcessingJobRetry/);
 });

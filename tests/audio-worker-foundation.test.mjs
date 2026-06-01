@@ -25,7 +25,7 @@ const binaryModuleCandidates = [
   "workers/audio/audio-binaries.mjs",
   "workers/audio/audio-binaries.js",
   "scripts/audio-worker.mjs",
-  "scripts/placeholders/audio-worker.mjs",
+  "scripts/audio-worker.mjs",
 ];
 
 const validationModuleCandidates = [
@@ -36,7 +36,7 @@ const validationModuleCandidates = [
   "workers/audio/audio-validation.mjs",
   "workers/audio/audio-validation.js",
   "scripts/audio-worker.mjs",
-  "scripts/placeholders/audio-worker.mjs",
+  "scripts/audio-worker.mjs",
 ];
 
 async function source(filePath) {
@@ -220,7 +220,7 @@ function validationCode(result) {
 }
 
 test("audio worker does not contain fake accepted waveform output paths", async () => {
-  const worker = await source("scripts/placeholders/audio-worker.mjs");
+  const worker = await source("scripts/audio-worker.mjs");
 
   assert.doesNotMatch(
     worker,

@@ -3,6 +3,7 @@ import "server-only";
 import { notFound, redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
+import { AISUserSafeError } from "@/lib/errors";
 import { createSupabaseAdminClient, type SupabaseDatabaseClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -193,6 +194,26 @@ export async function requireAdmin(nextPath = "/admin") {
 
   if (!isAdminProfile(profile)) {
     notFound();
+  }
+
+  return { user, profile };
+}
+
+export async function requireAdminApi(): Promise<{ user: User; profile: ProfileRow }> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    throw new AISUserSafeError("Authentication is required.", "not_authenticated", 401);
+  }
+
+  const profile = await getCurrentProfile(user.id);
+
+  if (!profile) {
+    throw new AISUserSafeError("The authenticated user has no profile row.", "profile_missing", 409);
+  }
+
+  if (!isAdminProfile(profile)) {
+    throw new AISUserSafeError("Admin access is required.", "admin_required", 404);
   }
 
   return { user, profile };

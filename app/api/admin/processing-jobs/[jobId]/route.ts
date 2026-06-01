@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import { getProcessingJobStatusSnapshot } from "@/lib/processing-jobs";
 
@@ -10,9 +10,8 @@ type ProcessingJobRouteContext = {
 };
 
 export async function GET(_request: Request, context: ProcessingJobRouteContext) {
-  await requireAdmin("/admin/processing");
-
   try {
+    await requireAdminApi();
     const { jobId } = await context.params;
     const status = await getProcessingJobStatusSnapshot(jobId);
 

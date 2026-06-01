@@ -130,7 +130,7 @@ test("processing_jobs schema exposes the documented state machine columns", asyn
 test("processing job retry route is admin-only and does not leak trusted credentials", async () => {
   const route = await source("app/api/admin/processing-jobs/[jobId]/retry/route.ts");
 
-  assert.match(route, /requireAdmin/);
+  assert.match(route, /requireAdminApi/);
   assert.doesNotMatch(route, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.doesNotMatch(route, /service[_ -]?role/i);
 });

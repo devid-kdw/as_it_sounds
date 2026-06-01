@@ -10,7 +10,7 @@ async function source(filePath) {
 }
 
 test("owner promotion script is email-driven and grants local owner access", async () => {
-  const script = await source("scripts/placeholders/promote-owner.mjs");
+  const script = await source("scripts/promote-owner.mjs");
 
   assert.match(script, /process\.env\.AIS_OWNER_EMAIL/);
   assert.match(script, /SUPABASE_SERVICE_ROLE_KEY/);
@@ -42,8 +42,8 @@ test("admin routes are server guarded and admin nav is not shown to normal visit
   const nav = await source("components/layout/site-nav.tsx");
 
   assert.match(adminLayout, /requireAdmin/);
-  assert.match(uploadRoute, /requireAdmin/);
-  assert.match(retryRoute, /requireAdmin/);
+  assert.match(uploadRoute, /requireAdminApi/);
+  assert.match(retryRoute, /requireAdminApi/);
   assert.match(nav, /item\.href !== "\/admin" \|\| canSeeAdmin/);
   assert.match(nav, /role"\)/);
 });

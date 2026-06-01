@@ -30,7 +30,7 @@ const BINARY_SPECS = Object.freeze({
 export async function resolveAudioBinaries({
   env = process.env,
   projectRoot = process.cwd(),
-  binaryMode = env.AIS_AUDIO_BINARY_MODE?.trim() || "pinned",
+  binaryMode = env.AIS_AUDIO_BINARY_MODE?.trim() || "system",
   required = ["ffmpeg", "ffprobe", "audiowaveform"],
 } = {}) {
   if (!["explicit", "pinned", "system"].includes(binaryMode)) {

@@ -355,7 +355,7 @@ test("account subscription and billing routes use local entitlement and controll
 });
 
 test("owner promotion script promotes by AIS_OWNER_EMAIL using trusted server privileges only", async () => {
-  const source = await readProjectFile("scripts/placeholders/promote-owner.mjs");
+  const source = await readProjectFile("scripts/promote-owner.mjs");
 
   assert.match(source, /AIS_OWNER_EMAIL/);
   assert.doesNotMatch(source, /owner@example\.com/, "owner promotion must not silently fall back to a sample owner email");

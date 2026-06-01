@@ -114,7 +114,7 @@ export function parseAudioWorkerSettings(input = {}, env = process.env) {
 }
 
 export function parseAudioWorkerConfig(env = process.env, input = {}) {
-  const binaryMode = env.AIS_AUDIO_BINARY_MODE?.trim() || "pinned";
+  const binaryMode = env.AIS_AUDIO_BINARY_MODE?.trim() || "system";
 
   if (!["explicit", "pinned", "system"].includes(binaryMode)) {
     throw new AudioWorkerConfigurationError("AIS_AUDIO_BINARY_MODE must be 'explicit', 'pinned', or 'system'.", {

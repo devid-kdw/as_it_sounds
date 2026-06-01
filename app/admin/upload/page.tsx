@@ -16,7 +16,6 @@ import {
 } from "lucide-react";
 import { RouteShell } from "@/components/ui/route-shell";
 import { adminSampleEditRoute } from "@/lib/routes";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import {
   type DuplicateWarning,
   type ProcessingStatus,
@@ -711,7 +710,6 @@ async function pollProcessingJob(
   activeRunRef: MutableRefObject<string | null>,
   updateQueueItem: ReturnType<typeof useAdminUploadStore.getState>["updateQueueItem"],
 ) {
-  const supabase = createSupabaseBrowserClient();
   const startedAt = Date.now();
 
   while (isActiveRun(activeRunRef, itemId)) {
@@ -742,7 +740,10 @@ async function pollProcessingJob(
 
     const job = payload.data;
     const processingStatus = normalizeProcessingStatus(job.processing_status);
-    const duplicateWarnings = await loadDuplicateWarnings(supabase, processingJobId);
+    const duplicateWarnings = extractDuplicateWarnings({
+      warnings: job.warnings,
+      duplicate_check: job.duplicate_check,
+    });
 
     updateQueueItem(itemId, {
       status: processingStatus === "succeeded" ? "complete" : "processing",
@@ -788,26 +789,9 @@ function getFinalizeTarget(session: ExtendedUploadSessionResponse): FinalizeTarg
   const url = session.finalize_url ?? session.finalize?.url ?? session.links?.finalize;
 
   return {
-    url: url ?? "/api/admin/upload-sessions/finalize",
+    url: url ?? `/api/admin/upload-sessions/${encodeURIComponent(session.processing_job_id)}/finalize`,
     method: session.finalize?.method ?? "POST",
   };
-}
-
-async function loadDuplicateWarnings(
-  supabase: ReturnType<typeof createSupabaseBrowserClient>,
-  processingJobId: string,
-) {
-  const { data, error } = await supabase
-    .from("processing_jobs")
-    .select("metadata")
-    .eq("id", processingJobId)
-    .maybeSingle();
-
-  if (error || !data) {
-    return [];
-  }
-
-  return extractDuplicateWarnings(data.metadata);
 }
 
 function extractDuplicateWarnings(metadata: unknown): DuplicateWarning[] {

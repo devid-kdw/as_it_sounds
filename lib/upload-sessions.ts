@@ -18,6 +18,7 @@ import type {
 } from "@/lib/supabase/admin";
 import type { StorageProvider } from "@/lib/storage";
 import { poeticNameSchema } from "@/lib/validators";
+import { tryWriteAdminAuditLog } from "@/lib/admin-audit";
 
 export const UPLOAD_SESSION_BUCKET = "ais-processing-temp";
 export const UPLOAD_SESSION_URL_TTL_SECONDS = 15 * 60;
@@ -164,12 +165,6 @@ export async function createSingleUploadSession(
 
   await assertActiveTaxonomy(supabase, request);
 
-  const signedUpload = await storage.createSignedUploadUrl(
-    uploadRef,
-    UPLOAD_SESSION_URL_TTL_SECONDS,
-    { upsert: false },
-  );
-
   const { error: sampleError } = await supabase.from("samples").insert({
     id: sampleId,
     poetic_name: buildDraftPoeticName(sampleId),
@@ -212,8 +207,34 @@ export async function createSingleUploadSession(
   } satisfies PublicTableInsert<"processing_jobs">);
 
   if (jobError) {
+    await cleanupUploadSessionRows(supabase, sampleId);
     throw new AISUserSafeError("Unable to create the processing job.", "upload_processing_job_create_failed", 500);
   }
+
+  let signedUpload;
+
+  try {
+    signedUpload = await storage.createSignedUploadUrl(
+      uploadRef,
+      UPLOAD_SESSION_URL_TTL_SECONDS,
+      { upsert: false },
+    );
+  } catch {
+    await cleanupUploadSessionRows(supabase, sampleId);
+    throw new AISUserSafeError("Unable to create the signed upload URL.", "upload_signed_url_create_failed", 500);
+  }
+
+  await tryWriteAdminAuditLog(supabase, {
+    actorUserId: actor.userId,
+    action: "upload_session.create",
+    entityType: "sample",
+    entityId: sampleId,
+    afterData: {
+      processing_job_id: processingJobId,
+      mode: "single",
+      upload_bucket: uploadRef.bucket,
+    },
+  });
 
   return {
     sample_id: sampleId,
@@ -272,6 +293,22 @@ export async function finalizeSingleUploadSession(
   if (updateError) {
     throw new AISUserSafeError("Unable to finalize the upload session.", "upload_session_finalize_failed", 500);
   }
+
+  await tryWriteAdminAuditLog(supabase, {
+    actorUserId: actor.userId,
+    action: "upload_session.finalize",
+    entityType: "processing_job",
+    entityId: job.id,
+    beforeData: {
+      status: job.status,
+      upload_finalized_at: getExistingStringMetadata(job.metadata, "upload_finalized_at"),
+    },
+    afterData: {
+      status: updatedJob.status,
+      upload_finalized_at: finalizedAt,
+      sample_id: job.sample_id,
+    },
+  });
 
   return {
     sample_id: job.sample_id,
@@ -333,6 +370,10 @@ async function assertActiveTaxonomy(
   if (!sampleType) {
     throw new AISUserSafeError("Upload sample type is not available.", "invalid_upload_sample_type", 400);
   }
+}
+
+async function cleanupUploadSessionRows(supabase: SupabaseDatabaseClient, sampleId: string) {
+  await supabase.from("samples").delete().eq("id", sampleId);
 }
 
 async function getUploadProcessingJob(supabase: SupabaseDatabaseClient, processingJobId: string) {

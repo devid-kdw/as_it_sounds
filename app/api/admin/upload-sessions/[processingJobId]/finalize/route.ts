@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdminApi } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import {
   finalizeSingleUploadSession,
@@ -13,9 +13,8 @@ type FinalizeRouteContext = {
 };
 
 export async function POST(request: Request, context: FinalizeRouteContext) {
-  const { user } = await requireAdmin("/admin/upload");
-
   try {
+    const { user } = await requireAdminApi();
     const { processingJobId } = await context.params;
     const payload = await parseJsonBody(request);
     const finalizeRequest = parseUploadSessionFinalizeRequest({

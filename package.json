@@ -13,11 +13,12 @@
     "db:start": "supabase start",
     "db:reset": "supabase db reset",
     "db:seed": "supabase db reset",
-    "ais:promote-owner": "node scripts/placeholders/promote-owner.mjs",
-    "worker:audio": "node scripts/placeholders/audio-worker.mjs",
-    "ais:open-library": "node scripts/placeholders/open-local-path.mjs library",
-    "ais:open-dropzone": "node scripts/placeholders/open-local-path.mjs dropzone",
-    "ais:open-cache": "node scripts/placeholders/open-local-path.mjs cache"
+    "test:db": "AIS_RUN_DB_TESTS=1 node --test tests/database-rls.test.mjs",
+    "ais:promote-owner": "node scripts/promote-owner.mjs",
+    "worker:audio": "node scripts/audio-worker.mjs",
+    "ais:open-library": "node scripts/open-local-path.mjs library",
+    "ais:open-dropzone": "node scripts/open-local-path.mjs dropzone",
+    "ais:open-cache": "node scripts/open-local-path.mjs cache"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
