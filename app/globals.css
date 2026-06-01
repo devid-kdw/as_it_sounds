@@ -148,6 +148,19 @@ select {
   text-transform: lowercase;
 }
 
+.ais-input {
+  width: 100%;
+  border: 1px solid var(--ais-border-soft);
+  border-radius: var(--ais-r-sm);
+  background: var(--ais-panel);
+  color: var(--ais-text);
+  padding: 0.625rem 0.75rem;
+}
+
+.ais-input::placeholder {
+  color: var(--ais-text-faint);
+}
+
 .ais-shimmer {
   background: linear-gradient(90deg, var(--ais-surface) 0%, var(--ais-elevated) 50%, var(--ais-surface) 100%);
   background-size: 200% 100%;
