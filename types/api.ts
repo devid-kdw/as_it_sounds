@@ -39,9 +39,23 @@ export type UploadSessionCreateResponse = {
   signed_upload: SignedUploadResponse;
 };
 
-export type UploadSessionCreateApiResponse =
-  | UploadSessionCreateResponse
-  | ApiErrorResponse;
+export type UploadSessionCreateApiResponse = ApiResponse<UploadSessionCreateResponse>;
+
+export type UploadSessionFinalizeRequest = {
+  mode?: "single";
+  sample_id: string;
+  processing_job_id: string;
+};
+
+export type UploadSessionFinalizeResponse = {
+  sample_id: string;
+  processing_job_id: string;
+  processing_status: string;
+  sample_processing_status: string | null;
+  finalized: true;
+};
+
+export type UploadSessionFinalizeApiResponse = ApiResponse<UploadSessionFinalizeResponse>;
 
 export type ProcessingJobRetryResponse = {
   processing_job_id: string;
@@ -49,3 +63,23 @@ export type ProcessingJobRetryResponse = {
   retry_eligible: boolean;
   reason: string | null;
 };
+
+export type ProcessingJobStatusResponse = {
+  processing_job_id: string;
+  sample_id: string | null;
+  job_type: string;
+  processing_status: string;
+  sample_processing_status: string | null;
+  attempts: number;
+  max_attempts: number;
+  retry_eligible: boolean;
+  retry_reason: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProcessingJobStatusApiResponse = ApiResponse<ProcessingJobStatusResponse>;

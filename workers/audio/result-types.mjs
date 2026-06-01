@@ -52,8 +52,10 @@ export function createWorkerSuccessPayload({
   assets,
   warnings = [],
   toolVersions = {},
+  duplicateCheck,
+  processingDurationMs,
 }) {
-  return {
+  const payload = {
     ok: true,
     sample_id: sampleId,
     processing_job_id: processingJobId,
@@ -62,6 +64,16 @@ export function createWorkerSuccessPayload({
     warnings,
     tool_versions: toolVersions,
   };
+
+  if (duplicateCheck !== undefined) {
+    payload.duplicate_check = duplicateCheck;
+  }
+
+  if (processingDurationMs !== undefined) {
+    payload.processing_duration_ms = processingDurationMs;
+  }
+
+  return payload;
 }
 
 export function createWorkerFailurePayload({ sampleId, processingJobId, error }) {

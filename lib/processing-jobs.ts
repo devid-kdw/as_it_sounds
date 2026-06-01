@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { ProcessingJobStatusResponse } from "@/types/api";
 import type { Json } from "@/types/database.types";
 import {
   createSupabaseAdminClient,
@@ -18,6 +19,7 @@ import {
 export type ProcessingJobRow = PublicTableRow<"processing_jobs">;
 export type ProcessingJobStatus = ProcessingJobRow["status"];
 export type ProcessingJobType = ProcessingJobRow["job_type"];
+export type SampleProcessingStatus = PublicTableRow<"samples">["status"];
 
 export type ProcessingJobSourceMetadata = {
   sha256: string;
@@ -102,6 +104,41 @@ export async function getProcessingJob(
   }
 
   return data;
+}
+
+export async function getProcessingJobStatusSnapshot(
+  jobId: string,
+  options: ProcessingJobServiceOptions = {},
+): Promise<ProcessingJobStatusResponse> {
+  const supabase = getSupabase(options);
+  const job = await getProcessingJob(jobId, { ...options, supabase });
+
+  if (!job) {
+    throw new AISUserSafeError("Processing job was not found.", "processing_job_not_found", 404);
+  }
+
+  const sampleStatus = job.sample_id
+    ? await getSampleProcessingStatus(supabase, job.sample_id)
+    : null;
+  const retryEligibility = determineProcessingJobRetryEligibility(job, "admin");
+
+  return {
+    processing_job_id: job.id,
+    sample_id: job.sample_id,
+    job_type: job.job_type,
+    processing_status: job.status,
+    sample_processing_status: sampleStatus,
+    attempts: job.attempts,
+    max_attempts: job.max_attempts,
+    retry_eligible: retryEligibility.eligible,
+    retry_reason: retryEligibility.reason,
+    last_error_code: job.last_error_code,
+    last_error_message: job.last_error_message,
+    started_at: job.started_at,
+    finished_at: job.finished_at,
+    created_at: job.created_at,
+    updated_at: job.updated_at,
+  };
 }
 
 export async function claimQueuedProcessingJob(
@@ -498,6 +535,27 @@ async function requireProcessingJob(
   }
 
   return job;
+}
+
+async function getSampleProcessingStatus(
+  supabase: SupabaseDatabaseClient,
+  sampleId: string,
+): Promise<SampleProcessingStatus> {
+  const { data, error } = await supabase
+    .from("samples")
+    .select("status")
+    .eq("id", sampleId)
+    .maybeSingle();
+
+  if (error) {
+    throw new AISUserSafeError("Unable to load the sample processing status.", "processing_sample_lookup_failed", 500);
+  }
+
+  if (!data) {
+    throw new AISUserSafeError("Processing sample was not found.", "processing_sample_not_found", 404);
+  }
+
+  return data.status;
 }
 
 async function updateInitialUploadSampleStatus(

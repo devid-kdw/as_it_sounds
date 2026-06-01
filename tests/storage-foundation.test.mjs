@@ -95,14 +95,14 @@ test("signed upload session responses are scoped and never include service role 
     assert.match(uploadSessions, /Only \.wav files are supported|isWavFilename/);
   }
 
-  if (!/signed_upload|createSignedUploadUrl|upload_bucket|upload_path/.test(route)) {
+  if (!/signed_upload|createSignedUploadUrl|upload_bucket|upload_path/.test(combined)) {
     t.skip("Signed upload session implementation is not present yet.");
     return;
   }
 
-  assert.match(route, /upload_bucket/);
-  assert.match(route, /upload_path/);
-  assert.match(route, /signed_upload/);
-  assert.match(route, /expires_at|expiresIn|expires_in/i);
+  assert.match(combined, /upload_bucket/);
+  assert.match(combined, /upload_path/);
+  assert.match(combined, /signed_upload/);
+  assert.match(combined, /expires_at|expiresIn|expires_in/i);
   assert.doesNotMatch(route, /original_wav[\s\S]{0,120}upload_bucket/);
 });

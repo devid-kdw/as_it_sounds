@@ -1,6 +1,5 @@
-import { spawn } from "node:child_process";
-
 import { AudioProcessingError } from "./errors.mjs";
+import { runAudioCommand } from "./commands.mjs";
 
 export function buildFfprobeCommand(ffprobePath, inputFile) {
   return {
@@ -70,10 +69,17 @@ export async function runFfprobeMetadata({
   ffprobePath,
   inputFile,
   timeoutMs = 30_000,
-  spawnImpl = spawn,
+  spawnImpl,
 }) {
   const { command, args } = buildFfprobeCommand(ffprobePath, inputFile);
-  const result = await runCommand({ command, args, timeoutMs, spawnImpl });
+  const result = await runAudioCommand({
+    command,
+    args,
+    timeoutMs,
+    spawnImpl,
+    errorCode: "METADATA_EXTRACTION_FAILED",
+    errorMessage: "ffprobe failed while reading audio metadata.",
+  });
 
   if (result.exitCode !== 0) {
     throw new AudioProcessingError("METADATA_EXTRACTION_FAILED", "ffprobe failed while reading audio metadata.", {
@@ -123,31 +129,4 @@ function firstFiniteInteger(...values) {
   }
 
   return null;
-}
-
-async function runCommand({ command, args, timeoutMs, spawnImpl }) {
-  return new Promise((resolve, reject) => {
-    const child = spawnImpl(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    const timeout = setTimeout(() => {
-      child.kill("SIGTERM");
-      reject(new AudioProcessingError("WORKER_TIMEOUT", "Audio command timed out.", { command, timeout_ms: timeoutMs }));
-    }, timeoutMs);
-    const stdout = [];
-    const stderr = [];
-
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.on("error", (error) => {
-      clearTimeout(timeout);
-      reject(error);
-    });
-    child.on("close", (exitCode) => {
-      clearTimeout(timeout);
-      resolve({
-        exitCode,
-        stdout: Buffer.concat(stdout).toString("utf8"),
-        stderr: Buffer.concat(stderr).toString("utf8"),
-      });
-    });
-  });
 }

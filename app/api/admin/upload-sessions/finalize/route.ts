@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth";
 import { AISUserSafeError } from "@/lib/errors";
 import {
-  createSingleUploadSession,
-  parseUploadSessionCreateRequest,
+  finalizeSingleUploadSession,
+  parseUploadSessionFinalizeRequest,
 } from "@/lib/upload-sessions";
 
 export async function POST(request: Request) {
@@ -11,17 +11,12 @@ export async function POST(request: Request) {
 
   try {
     const payload = await parseJsonBody(request);
-    const uploadRequest = parseUploadSessionCreateRequest(payload);
-
-    if (uploadRequest.mode !== "single") {
-      throw new AISUserSafeError("Only single upload sessions are supported.", "unsupported_upload_session_mode", 400);
-    }
-
-    const uploadSession = await createSingleUploadSession(uploadRequest, { userId: user.id });
+    const finalizeRequest = parseUploadSessionFinalizeRequest(payload);
+    const result = await finalizeSingleUploadSession(finalizeRequest, { userId: user.id });
 
     return NextResponse.json({
       ok: true,
-      data: uploadSession,
+      data: result,
     });
   } catch (error) {
     if (error instanceof AISUserSafeError) {
@@ -38,8 +33,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         ok: false,
-        code: "upload_session_request_failed",
-        message: "Unable to validate the upload session request.",
+        code: "upload_session_finalize_failed",
+        message: "Unable to finalize the upload session.",
       },
       { status: 500 },
     );
