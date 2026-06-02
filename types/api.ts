@@ -114,6 +114,40 @@ export type WanderInput = SearchInput & {
   limit?: number | null;
 };
 
+export type LocalActionKind = "exported_to_dropzone" | "revealed" | "copy_path";
+
+export type LocalDropzoneExportRequest = {
+  sampleId: string;
+};
+
+export type LocalDropzoneExportResponse = {
+  filename: string;
+  tokenizedPath: string;
+  dropzoneTokenizedPath: string;
+  sampleId: string;
+  action: Extract<LocalActionKind, "exported_to_dropzone">;
+};
+
+export type LocalPathActionRequest = {
+  tokenizedPath: string;
+};
+
+export type LocalRevealResponse = {
+  tokenizedPath: string;
+  revealed: boolean;
+  action: Extract<LocalActionKind, "revealed">;
+};
+
+export type LocalCopyPathResponse = {
+  tokenizedPath: string;
+  absolutePath: string;
+  action: Extract<LocalActionKind, "copy_path">;
+};
+
+export type LocalDropzoneExportApiResponse = ApiResponse<LocalDropzoneExportResponse>;
+export type LocalRevealApiResponse = ApiResponse<LocalRevealResponse>;
+export type LocalCopyPathApiResponse = ApiResponse<LocalCopyPathResponse>;
+
 export type UploadSessionMode = "single" | "bulk";
 
 export type UploadSessionCreateRequest = {

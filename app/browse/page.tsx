@@ -4,6 +4,7 @@ import { BrowseSearchControls } from "@/app/browse/browse-search-controls";
 import { SampleGrid } from "@/components/library/sample-grid";
 import { EmptyState } from "@/components/ui/empty-state";
 import { parseSearchParams, searchSamples, serializeSearchParams } from "@/lib/data/search";
+import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 import type { SearchInput, SearchSort } from "@/types/api";
 
 type BrowsePageProps = {
@@ -13,7 +14,7 @@ type BrowsePageProps = {
 export default async function BrowsePage({ searchParams }: BrowsePageProps) {
   const params = await searchParams;
   const input = parseSearchParams(params ?? {});
-  const response = await searchSamples(input);
+  const [response, entitlement] = await Promise.all([searchSamples(input), getEntitlementForCurrentUser()]);
   const hasActiveSearch = hasVisibleSearchState(response.appliedFilters);
 
   return (
@@ -36,7 +37,7 @@ export default async function BrowsePage({ searchParams }: BrowsePageProps) {
       </div>
 
       {response.results.length > 0 ? (
-        <SampleGrid samples={response.results} sourceSurface="browse" />
+        <SampleGrid entitlement={entitlement} samples={response.results} sourceSurface="browse" />
       ) : (
         <EmptyState
           eyebrow={hasActiveSearch ? "no results" : "empty library"}

@@ -2,20 +2,22 @@
 
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { Download, FolderPlus, Heart, Pause, Play } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { WaveformPreview } from "@/components/player/waveform-preview";
+import { SampleActions, type SampleActionEntitlement } from "@/components/sample-actions/sample-actions";
 import { sampleDetailRoute } from "@/lib/routes";
 import { usePlayerStore } from "@/stores/player-store";
 import type { PlayerSurface } from "@/stores/player-store";
 import type { SampleCardView } from "@/types/sample";
 
 type SampleCardProps = {
+  entitlement: SampleActionEntitlement;
   sample: SampleCardView;
   sourceSurface?: PlayerSurface;
   featured?: boolean;
 };
 
-export function SampleCard({ featured = false, sample, sourceSurface = "browse" }: SampleCardProps) {
+export function SampleCard({ entitlement, featured = false, sample, sourceSurface = "browse" }: SampleCardProps) {
   const activeSampleId = usePlayerStore((state) => state.activeSampleId);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const setActiveSample = usePlayerStore((state) => state.setActiveSample);
@@ -135,17 +137,7 @@ export function SampleCard({ featured = false, sample, sourceSurface = "browse" 
           ))}
           {sample.moods.length === 0 ? <span className="ais-meta text-xs text-ais-faint">no moods assigned</span> : null}
         </div>
-        <div className="flex gap-1">
-          <PlaceholderAction active={sample.isFavoritedByCurrentUser} label="Favorite sample">
-            <Heart size={16} aria-hidden="true" />
-          </PlaceholderAction>
-          <PlaceholderAction label="Add to collection">
-            <FolderPlus size={16} aria-hidden="true" />
-          </PlaceholderAction>
-          <PlaceholderAction label="Download sample">
-            <Download size={16} aria-hidden="true" />
-          </PlaceholderAction>
-        </div>
+        <SampleActions entitlement={entitlement} initialFavorited={sample.isFavoritedByCurrentUser} sample={sample} />
       </div>
     </article>
   );
@@ -166,29 +158,5 @@ function MetaPill({ children }: { children: ReactNode }) {
     <span className="ais-meta rounded-full border border-ais-border-soft bg-ais-panel px-2.5 py-1 text-xs text-ais-faint">
       {children}
     </span>
-  );
-}
-
-function PlaceholderAction({
-  active = false,
-  children,
-  label,
-}: {
-  active?: boolean;
-  children: ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      aria-label={`${label} placeholder`}
-      className={[
-        "grid size-9 place-items-center rounded-full border transition duration-ais-base",
-        active ? "border-ais-amber text-ais-amber" : "border-ais-border-soft text-ais-muted hover:border-ais-moss hover:text-ais-text",
-      ].join(" ")}
-      title={`${label} placeholder`}
-      type="button"
-    >
-      {children}
-    </button>
   );
 }

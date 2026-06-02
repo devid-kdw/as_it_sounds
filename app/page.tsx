@@ -3,11 +3,12 @@ import { ArrowRight, Mail, ShieldCheck, Sparkles } from "lucide-react";
 import { SampleCard } from "@/components/library/sample-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getFeaturedSamples } from "@/lib/data/samples";
+import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 
 const moodEntryPoints = ["haunted", "warm", "fragile", "industrial", "distant", "ritual"];
 
 export default async function Home() {
-  const featuredSamples = await getFeaturedSamples(3);
+  const [featuredSamples, entitlement] = await Promise.all([getFeaturedSamples(3), getEntitlementForCurrentUser()]);
 
   return (
     <div className="grid gap-10 pb-24">
@@ -53,7 +54,7 @@ export default async function Home() {
         {featuredSamples.length > 0 ? (
           <div className="grid gap-4 lg:grid-cols-3">
             {featuredSamples.map((sample) => (
-              <SampleCard featured key={sample.id} sample={sample} sourceSurface="browse" />
+              <SampleCard entitlement={entitlement} featured key={sample.id} sample={sample} sourceSurface="browse" />
             ))}
           </div>
         ) : (

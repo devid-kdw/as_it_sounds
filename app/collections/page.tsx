@@ -1,18 +1,17 @@
-import { EmptyState } from "@/components/ui/empty-state";
+import { CollectionsWorkspace } from "@/components/collections/collections-workspace";
 import { RouteShell } from "@/components/ui/route-shell";
+import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 
-export default function CollectionsPage() {
+export default async function CollectionsPage() {
+  const entitlement = await getEntitlementForCurrentUser();
+
   return (
     <RouteShell
       eyebrow="collections"
-      title="Private collections shell"
-      description="Authenticated collection routes are present. User-owned data will live in Supabase with RLS rather than in client-only state."
+      title="Private collections"
+      description="Gather published sounds into private listening paths. Names and atmosphere stay first; collection tools stay quiet and owner-scoped."
     >
-      <EmptyState
-        eyebrow="no collections"
-        title="No private collections are loaded yet"
-        description="This phase keeps collection behavior empty until auth, schema, and data access are approved."
-      />
+      <CollectionsWorkspace entitlement={entitlement} />
     </RouteShell>
   );
 }

@@ -1,11 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { ReactNode } from "react";
-import { Download, FolderPlus, Heart, ShieldCheck } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
 import { SampleCard, formatDuration } from "@/components/library/sample-card";
 import { WaveformPreview } from "@/components/player/waveform-preview";
+import { SampleActions } from "@/components/sample-actions/sample-actions";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getSampleByPoeticName } from "@/lib/data/samples";
+import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 import { routes } from "@/lib/routes";
 
 type SampleDetailPageProps = {
@@ -30,7 +31,7 @@ export async function generateMetadata({ params }: SampleDetailPageProps) {
 
 export default async function SampleDetailPage({ params }: SampleDetailPageProps) {
   const { poeticName } = await params;
-  const sample = await getSampleByPoeticName(poeticName);
+  const [sample, entitlement] = await Promise.all([getSampleByPoeticName(poeticName), getEntitlementForCurrentUser()]);
 
   if (!sample) {
     notFound();
@@ -68,17 +69,7 @@ export default async function SampleDetailPage({ params }: SampleDetailPageProps
             <p className="ais-meta text-ais-amber">waveform preview</p>
             <h2 className="ais-title mt-2 text-3xl text-ais-text">Listen before the metadata</h2>
           </div>
-          <div className="flex gap-2">
-            <PlaceholderAction label="Favorite sample">
-              <Heart size={16} aria-hidden="true" />
-            </PlaceholderAction>
-            <PlaceholderAction label="Add to collection">
-              <FolderPlus size={16} aria-hidden="true" />
-            </PlaceholderAction>
-            <PlaceholderAction label="Download sample">
-              <Download size={16} aria-hidden="true" />
-            </PlaceholderAction>
-          </div>
+          <SampleActions compact={false} entitlement={entitlement} initialFavorited={sample.isFavoritedByCurrentUser} sample={sample} />
         </div>
         <WaveformPreview
           durationSeconds={sample.durationSeconds}
@@ -121,7 +112,7 @@ export default async function SampleDetailPage({ params }: SampleDetailPageProps
 
       <section className="grid gap-4">
         <p className="ais-meta text-ais-amber">public card state</p>
-        <SampleCard sample={sample} sourceSurface="detail" featured />
+        <SampleCard entitlement={entitlement} sample={sample} sourceSurface="detail" featured />
       </section>
 
       <EmptyState
@@ -145,24 +136,5 @@ function MetaRow({ label, value }: { label: string; value: string }) {
       <dt className="ais-meta text-xs text-ais-faint">{label}</dt>
       <dd className="text-right text-ais-muted">{value}</dd>
     </div>
-  );
-}
-
-function PlaceholderAction({
-  children,
-  label,
-}: {
-  children: ReactNode;
-  label: string;
-}) {
-  return (
-    <button
-      aria-label={`${label} placeholder`}
-      className="grid size-10 place-items-center rounded-full border border-ais-border-soft text-ais-muted transition duration-ais-base hover:border-ais-moss hover:text-ais-text"
-      title={`${label} placeholder`}
-      type="button"
-    >
-      {children}
-    </button>
   );
 }
