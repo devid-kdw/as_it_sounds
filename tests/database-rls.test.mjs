@@ -463,6 +463,100 @@ if (!RUN_DB_TESTS) {
       }
     });
 
+    await t.test("billing state writes use service role while clients get read-only access", async () => {
+      const { admin, tracked, users } = fixture;
+
+      await setSubscriptionStatus(admin, users.alpha.id, "free_launch_access");
+
+      const ownSubscription = await users.alpha.client
+        .from("subscriptions")
+        .select("id,user_id,status")
+        .eq("user_id", users.alpha.id)
+        .single();
+      assertNoError(ownSubscription.error, "users can read own subscription");
+      assert.equal(ownSubscription.data.status, "free_launch_access");
+
+      const otherSubscription = await users.alpha.client
+        .from("subscriptions")
+        .select("id,user_id,status")
+        .eq("user_id", users.beta.id);
+      assertDeniedOrNoRows(otherSubscription, "users must not read another user's subscription");
+
+      const userUpdate = await users.alpha.client
+        .from("subscriptions")
+        .update({ status: "active" })
+        .eq("user_id", users.alpha.id)
+        .select("user_id,status");
+      assertDeniedOrNoRows(userUpdate, "users must not update subscription state");
+
+      const userDelete = await users.alpha.client
+        .from("subscriptions")
+        .delete()
+        .eq("user_id", users.alpha.id)
+        .select("user_id");
+      assertDeniedOrNoRows(userDelete, "users must not delete subscription state");
+
+      const serviceRoleUpdate = await admin
+        .from("subscriptions")
+        .update({
+          status: "active",
+          stripe_price_id: `price_${fixture.prefix}`,
+          current_period_start: nowIso(),
+          current_period_end: nowIso(),
+        })
+        .eq("user_id", users.alpha.id)
+        .select("id,user_id,status")
+        .single();
+      assertNoError(serviceRoleUpdate.error, "service role can update subscription state");
+      assert.equal(serviceRoleUpdate.data.status, "active");
+
+      const stripeEventId = `evt_${fixture.prefix}_transition`;
+      const entitlementEvent = await admin
+        .from("entitlement_events")
+        .insert({
+          user_id: users.alpha.id,
+          subscription_id: serviceRoleUpdate.data.id,
+          stripe_event_id: stripeEventId,
+          stripe_event_type: "customer.subscription.updated",
+          previous_status: "free_launch_access",
+          new_status: "active",
+          payload: { id: stripeEventId, object: "event" },
+        })
+        .select("id,stripe_event_id,new_status")
+        .single();
+      assertNoError(entitlementEvent.error, "service role can insert entitlement transition events");
+      tracked.entitlementEventIds.add(entitlementEvent.data.id);
+
+      const normalEntitlementRead = await users.alpha.client
+        .from("entitlement_events")
+        .select("id,stripe_event_id")
+        .eq("id", entitlementEvent.data.id);
+      assertDeniedOrNoRows(normalEntitlementRead, "normal users must not read entitlement events");
+
+      const adminEntitlementRead = await users.admin.client
+        .from("entitlement_events")
+        .select("id,stripe_event_id,new_status")
+        .eq("id", entitlementEvent.data.id)
+        .single();
+      assertNoError(adminEntitlementRead.error, "admin users can read entitlement events");
+      assert.equal(adminEntitlementRead.data.stripe_event_id, stripeEventId);
+      assert.equal(adminEntitlementRead.data.new_status, "active");
+
+      const normalEntitlementInsert = await users.alpha.client
+        .from("entitlement_events")
+        .insert({
+          user_id: users.alpha.id,
+          subscription_id: serviceRoleUpdate.data.id,
+          stripe_event_id: `evt_${fixture.prefix}_forged_transition`,
+          stripe_event_type: "customer.subscription.updated",
+          previous_status: "active",
+          new_status: "lifetime_granted",
+          payload: { object: "event" },
+        })
+        .select("id");
+      assertDeniedOrNoRows(normalEntitlementInsert, "normal users must not insert entitlement events");
+    });
+
     await t.test("duplicate Stripe event IDs are rejected", async () => {
       const { admin, tracked } = fixture;
       const stripeEventId = `evt_${fixture.prefix}_duplicate`;
@@ -704,6 +798,7 @@ async function createFixture() {
   const tracked = {
     albumIds: new Set(),
     collectionIds: new Set(),
+    entitlementEventIds: new Set(),
     hiddenTagSlugs: new Set(),
     sampleIds: new Set(),
     stripeEventIds: new Set(),
@@ -1014,6 +1109,7 @@ async function getSearchDocument(admin, sampleId) {
 async function cleanupFixture(fixture) {
   await maybeSetFreeLaunch(fixture.admin, fixture.originalFreeLaunchValue);
 
+  await deleteWhereIn(fixture.admin, "entitlement_events", "id", fixture.tracked.entitlementEventIds);
   await deleteWhereIn(fixture.admin, "stripe_webhook_events", "stripe_event_id", fixture.tracked.stripeEventIds);
   await deleteWhereIn(fixture.admin, "collection_items", "collection_id", fixture.tracked.collectionIds);
   await deleteWhereIn(fixture.admin, "collections", "id", fixture.tracked.collectionIds);

@@ -1,43 +1,4 @@
-import { NextResponse } from "next/server";
-import { AccessConfigError, getAccessConfig } from "@/lib/entitlement";
+// Compatibility wrapper: preserves the /api/account/billing/portal billing_disabled 409 contract.
+export const runtime = "nodejs";
 
-export async function POST() {
-  let billingMode: ReturnType<typeof getAccessConfig>["billingMode"];
-
-  try {
-    billingMode = getAccessConfig().billingMode;
-  } catch (error) {
-    if (error instanceof AccessConfigError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          code: error.code,
-          message: error.message,
-        },
-        { status: 500 },
-      );
-    }
-
-    throw error;
-  }
-
-  if (billingMode === "disabled") {
-    return NextResponse.json(
-      {
-        ok: false,
-        code: "billing_disabled",
-        message: "Billing is disabled in the current AIS access mode.",
-      },
-      { status: 409 },
-    );
-  }
-
-  return NextResponse.json(
-    {
-      ok: false,
-      code: "stripe_not_configured",
-      message: "Stripe Customer Portal is reserved for a later paid billing phase.",
-    },
-    { status: 501 },
-  );
-}
+export { POST } from "@/app/api/billing/portal/route";

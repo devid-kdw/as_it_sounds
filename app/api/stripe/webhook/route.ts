@@ -30,6 +30,7 @@ type SubscriptionPatch = {
 const SIGNATURE_TOLERANCE_SECONDS = 300;
 const STRIPE_SUPPORTED_EVENTS = new Set([
   "checkout.session.completed",
+  "customer.subscription.created",
   "customer.subscription.updated",
   "customer.subscription.deleted",
   "invoice.payment_failed",
@@ -148,7 +149,11 @@ async function processStripeEvent(admin: ReturnType<typeof createSupabaseAdminCl
     return;
   }
 
-  if (event.type === "customer.subscription.updated" || event.type === "customer.subscription.deleted") {
+  if (
+    event.type === "customer.subscription.created" ||
+    event.type === "customer.subscription.updated" ||
+    event.type === "customer.subscription.deleted"
+  ) {
     await updateSubscriptionFromSubscription(admin, event, object);
     return;
   }
@@ -177,7 +182,7 @@ async function updateSubscriptionFromCheckoutSession(
     stripeCustomerId,
     stripeSubscriptionId,
     stripePriceId: null,
-    status: existing?.status ?? "active",
+    status: "active",
     currentPeriodStart: existing?.current_period_start ?? null,
     currentPeriodEnd: existing?.current_period_end ?? null,
     cancelAtPeriodEnd: existing?.cancel_at_period_end ?? false,
@@ -320,7 +325,7 @@ async function markWebhookEvent(
   status: WebhookProcessingStatus,
   errorMessage: string | null,
 ) {
-  await admin
+  const { error } = await admin
     .from("stripe_webhook_events")
     .update({
       processing_status: status,
@@ -328,6 +333,10 @@ async function markWebhookEvent(
       error_message: errorMessage,
     })
     .eq("stripe_event_id", eventId);
+
+  if (error) {
+    throw new Error(`Unable to mark Stripe webhook event ${status}: ${error.message}`);
+  }
 }
 
 async function getSubscriptionByUserId(admin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
@@ -443,11 +452,21 @@ function timingSafeEqualHex(left: string, right: string) {
 }
 
 function mapStripeSubscriptionStatus(value: unknown): SubscriptionStatus {
-  if (value === "trialing" || value === "active" || value === "past_due" || value === "canceled" || value === "unpaid") {
-    return value;
+  switch (value) {
+    case "trialing":
+    case "active":
+    case "past_due":
+    case "canceled":
+    case "unpaid":
+      return value;
+    case "incomplete":
+      return "past_due";
+    case "incomplete_expired":
+    case "paused":
+      return "canceled";
+    default:
+      return "unpaid";
   }
-
-  return "unpaid";
 }
 
 function firstSubscriptionPriceId(subscription: Record<string, unknown>) {
@@ -471,7 +490,7 @@ function metadataUserId(object: Record<string, unknown>) {
     return null;
   }
 
-  return stringValue(object.metadata.user_id);
+  return stringValue(object.metadata.ais_user_id) ?? stringValue(object.metadata.user_id);
 }
 
 function unixSecondsToIso(value: unknown) {

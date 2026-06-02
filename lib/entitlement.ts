@@ -34,11 +34,12 @@ export type EntitlementState = {
 };
 
 export class AccessConfigError extends Error {
-  code = "access_mode_invalid" as const;
+  code: "access_mode_invalid" | "paid_preview_not_ready";
 
-  constructor(message: string) {
+  constructor(message: string, code: "access_mode_invalid" | "paid_preview_not_ready" = "access_mode_invalid") {
     super(message);
     this.name = "AccessConfigError";
+    this.code = code;
   }
 }
 
@@ -69,6 +70,13 @@ export function getAccessConfig(): { accessMode: AccessMode; billingMode: Billin
 
   if (accessMode === "paid_live" && billingMode !== "live") {
     throw new AccessConfigError("paid_live mode requires AIS_BILLING_MODE=live.");
+  }
+
+  if (accessMode === "paid_live" && !readBooleanEnv("AIS_LIMITED_PREVIEWS_READY", false)) {
+    throw new AccessConfigError(
+      "paid_live mode requires AIS_LIMITED_PREVIEWS_READY=true so non-subscriber previews cannot expose full public audio.",
+      "paid_preview_not_ready",
+    );
   }
 
   return { accessMode, billingMode };
@@ -260,4 +268,22 @@ function readAllowedEnv<T extends string>(name: string, fallback: T, allowed: re
   }
 
   return value;
+}
+
+function readBooleanEnv(name: string, fallback: boolean) {
+  const value = process.env[name];
+
+  if (value === undefined || value === "") {
+    return fallback;
+  }
+
+  if (value === "true") {
+    return true;
+  }
+
+  if (value === "false") {
+    return false;
+  }
+
+  throw new AccessConfigError(`${name} must be true or false.`);
 }
