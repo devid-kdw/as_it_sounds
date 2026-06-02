@@ -2,6 +2,7 @@ export const navigationItems = [
   { href: "/browse", label: "Browse" },
   { href: "/wander", label: "Wander" },
   { href: "/collections", label: "Collections" },
+  { href: "/local-crates", label: "Crates", localOwnerOnly: true },
   { href: "/license", label: "License" },
   { href: "/account", label: "Account" },
   { href: "/admin", label: "Admin" },

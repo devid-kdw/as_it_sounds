@@ -1,10 +1,18 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Copy, Download, ExternalLink, FolderOpen, FolderPlus, Heart, Loader2 } from "lucide-react";
+import { CheckCircle2, Copy, Download, ExternalLink, FolderOpen, FolderPlus, Heart, Loader2, PackagePlus } from "lucide-react";
 import { CollectionModal } from "@/components/collections/collection-modal";
+import { LocalCrateSelector } from "@/components/local-crates/local-crate-selector";
+import {
+  readLocalCrateState,
+  syncLocalCrateEntry,
+  upsertLocalCrateEntry,
+  type LocalCrateSampleInput,
+} from "@/components/local-crates/local-crate-state";
 import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { useCollectionUiStore } from "@/stores/collection-ui-store";
+import type { LocalCrateSampleStatus } from "@/types/api";
 
 export type SampleActionEntitlement = {
   userId: string | null;
@@ -277,6 +285,10 @@ export function SampleActions({ compact = true, entitlement, initialFavorited, s
       if (action === "export") {
         setLocalTokenizedPath(nextTokenizedPath);
         setDropzoneTokenizedPath(nextDropzoneTokenizedPath);
+        const cratePath = nextTokenizedPath ?? nextDropzoneTokenizedPath;
+        if (cratePath) {
+          void upsertActiveCrate("exported", cratePath, { silent: true });
+        }
       }
 
       if (action === "copy_path") {
@@ -297,6 +309,64 @@ export function SampleActions({ compact = true, entitlement, initialFavorited, s
       });
     } catch (error) {
       showMessage({ tone: "error", text: error instanceof Error ? error.message : "Local action failed." });
+    } finally {
+      setLocalPending(null);
+    }
+  }
+
+  async function upsertActiveCrate(
+    status: LocalCrateSampleStatus,
+    exportedPath: string | null = localTokenizedPath ?? dropzoneTokenizedPath,
+    options: { silent?: boolean } = {},
+  ) {
+    if (!isLocalOwnerSurface) {
+      showMessage({ tone: "warning", text: "Project Crates are available only in local owner mode." });
+      return;
+    }
+
+    const state = readLocalCrateState();
+    const crateName = state.activeCrateName;
+
+    if (!crateName) {
+      showMessage({ tone: "warning", text: "Create or select an active Project Crate first." });
+      return;
+    }
+
+    const crateSample: LocalCrateSampleInput = {
+      sampleId: sample.id,
+      poeticName: sample.poeticName,
+      displayTitle: sample.displayTitle,
+      bpm: sample.bpm,
+      musicalKey: sample.musicalKey,
+      exportedPath,
+    };
+
+    const previousMessage = message;
+    setLocalPending(status === "used" ? "mark_used" : "add_to_crate");
+    if (!options.silent) {
+      setMessage(null);
+    }
+
+    try {
+      upsertLocalCrateEntry({ crateName, sample: crateSample, status, exportedPath });
+      await syncLocalCrateEntry({ crateName, sample: crateSample, status, exportedPath });
+
+      if (!options.silent) {
+        showMessage({
+          tone: "success",
+          text: status === "used" ? `Marked used in ${crateName}.` : `Added to ${crateName}.`,
+        });
+      }
+    } catch (error) {
+      if (options.silent) {
+        setMessage(previousMessage);
+        return;
+      }
+
+      showMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Project Crate sync failed.",
+      });
     } finally {
       setLocalPending(null);
     }
@@ -335,34 +405,55 @@ export function SampleActions({ compact = true, entitlement, initialFavorited, s
       </div>
 
       {isLocalOwnerSurface ? (
-        <div className="flex flex-wrap justify-end gap-1 border-t border-ais-border-soft pt-2">
-          <IconActionButton
-            ariaLabel={`Export ${sample.displayTitle} to FL Dropzone`}
-            disabled={Boolean(localPending)}
-            onClick={() => void runLocalAction("export")}
-            sizeClass={buttonSize}
-            title="Export to FL Dropzone"
-          >
-            {localPending === "export" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
-          </IconActionButton>
-          <IconActionButton
-            ariaLabel="Reveal FL Dropzone in Finder"
-            disabled={Boolean(localPending)}
-            onClick={() => void runLocalAction("reveal")}
-            sizeClass={buttonSize}
-            title="Reveal in Finder"
-          >
-            {localPending === "reveal" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <FolderOpen size={16} aria-hidden="true" />}
-          </IconActionButton>
-          <IconActionButton
-            ariaLabel={`Copy local file path for ${sample.displayTitle}`}
-            disabled={Boolean(localPending)}
-            onClick={() => void runLocalAction("copy_path")}
-            sizeClass={buttonSize}
-            title="Copy File Path"
-          >
-            {localPending === "copy_path" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
-          </IconActionButton>
+        <div className="grid justify-items-end gap-2 border-t border-ais-border-soft pt-2">
+          <LocalCrateSelector onMessage={showMessage} />
+          <div className="flex flex-wrap justify-end gap-1">
+            <IconActionButton
+              ariaLabel={`Add ${sample.displayTitle} to active Project Crate`}
+              disabled={Boolean(localPending)}
+              onClick={() => void upsertActiveCrate("considered")}
+              sizeClass={buttonSize}
+              title="Add to Project Crate"
+            >
+              {localPending === "add_to_crate" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <PackagePlus size={16} aria-hidden="true" />}
+            </IconActionButton>
+            <IconActionButton
+              ariaLabel={`Mark ${sample.displayTitle} as used in active Project Crate`}
+              disabled={Boolean(localPending)}
+              onClick={() => void upsertActiveCrate("used")}
+              sizeClass={buttonSize}
+              title="Mark used"
+            >
+              {localPending === "mark_used" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <CheckCircle2 size={16} aria-hidden="true" />}
+            </IconActionButton>
+            <IconActionButton
+              ariaLabel={`Export ${sample.displayTitle} to FL Dropzone`}
+              disabled={Boolean(localPending)}
+              onClick={() => void runLocalAction("export")}
+              sizeClass={buttonSize}
+              title="Export to FL Dropzone"
+            >
+              {localPending === "export" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <ExternalLink size={16} aria-hidden="true" />}
+            </IconActionButton>
+            <IconActionButton
+              ariaLabel="Reveal FL Dropzone in Finder"
+              disabled={Boolean(localPending)}
+              onClick={() => void runLocalAction("reveal")}
+              sizeClass={buttonSize}
+              title="Reveal in Finder"
+            >
+              {localPending === "reveal" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <FolderOpen size={16} aria-hidden="true" />}
+            </IconActionButton>
+            <IconActionButton
+              ariaLabel={`Copy local file path for ${sample.displayTitle}`}
+              disabled={Boolean(localPending)}
+              onClick={() => void runLocalAction("copy_path")}
+              sizeClass={buttonSize}
+              title="Copy File Path"
+            >
+              {localPending === "copy_path" ? <Loader2 className="animate-spin" size={16} aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}
+            </IconActionButton>
+          </div>
         </div>
       ) : null}
 

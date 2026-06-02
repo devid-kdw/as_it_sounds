@@ -15,6 +15,7 @@ import {
   tokenizePath,
   resolveTokenizedPath,
 } from "@/lib/local-paths";
+import { logLocalUsageEvent } from "@/lib/local-events";
 import { createStorageProvider, type StorageProvider } from "@/lib/storage";
 import { createSupabaseAdminClient, type PublicTableRow, type SupabaseDatabaseClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -93,6 +94,17 @@ export async function exportSampleToFlDropzone(
   }
 
   await logLocalExportDownload(sample.id, entitlement, adminSupabase, options.request);
+  await logLocalUsageEvent({
+    type: "sample_exported_to_dropzone",
+    sampleId: sample.id,
+    sourceSurface: "browse",
+    tokenizedPath: tokenizePath(destinationPath),
+    userId: entitlement.userId,
+    metadata: {
+      filename: path.basename(destinationPath),
+      dropzonePath: tokenizePath(getLocalPaths().flDropzone),
+    },
+  });
 
   return {
     filename: path.basename(destinationPath),
@@ -114,6 +126,15 @@ export async function revealLocalTokenizedPath(tokenizedPath: string): Promise<L
     throw new AISUserSafeError("Unable to reveal the local path from this server environment.", "local_reveal_failed", 503);
   }
 
+  await logLocalUsageEvent({
+    type: "local_path_revealed",
+    sourceSurface: "browse",
+    tokenizedPath: tokenizePath(revealTarget),
+    metadata: {
+      action: "reveal",
+    },
+  });
+
   return {
     tokenizedPath: tokenizePath(revealTarget),
     revealed: true,
@@ -125,6 +146,14 @@ export async function getAbsoluteLocalPathForCopy(tokenizedPath: string): Promis
   await requireLocalOwnerActionEntitlement();
   const absolutePath = resolveLocalActionPath(tokenizedPath);
   await assertPathExists(absolutePath, "local_path_not_found");
+  await logLocalUsageEvent({
+    type: "local_path_copied",
+    sourceSurface: "browse",
+    tokenizedPath: tokenizePath(absolutePath),
+    metadata: {
+      action: "copy_path",
+    },
+  });
 
   // Copy path is the only local action allowed to return an absolute path.
   return {
@@ -143,27 +172,39 @@ export function buildLocalExportFilename(sample: Pick<LocalSampleRow, "id" | "po
   return `${poeticName}__${bpm}__${musicalKey || "no_key"}__${sampleIdShort}__ais.wav`;
 }
 
-async function requireLocalOwnerDownloadEntitlement(supabase: SupabaseDatabaseClient): Promise<EntitlementState> {
+async function requireLocalOwnerDownloadEntitlement(
+  supabase: SupabaseDatabaseClient,
+): Promise<EntitlementState & { userId: string }> {
+  return requireLocalOwnerWorkflowEntitlementForSupabase(supabase);
+}
+
+async function requireLocalOwnerActionEntitlement() {
+  const supabase = await createSupabaseServerClient();
+  await requireLocalOwnerDownloadEntitlement(supabase);
+}
+
+async function requireLocalOwnerWorkflowEntitlementForSupabase(
+  supabase: SupabaseDatabaseClient,
+): Promise<EntitlementState & { userId: string }> {
   const entitlement = await getEntitlementForCurrentUser(supabase);
 
   if (entitlement.accessMode !== "local_owner" || getAccessMode() !== "local_owner") {
     throw new AISUserSafeError("Local workflow actions are only available in Local Producer Mode.", "local_owner_only", 403);
   }
 
-  if (!entitlement.isAuthenticated) {
+  if (!entitlement.isAuthenticated || !entitlement.userId) {
     throw new AISUserSafeError("You must be signed in to export originals locally.", "not_authenticated", 401);
+  }
+
+  if (!entitlement.isAdmin && entitlement.subscriptionStatus !== "lifetime_granted") {
+    throw new AISUserSafeError("Local workflow actions are only available to the local owner.", "local_owner_only", 403);
   }
 
   if (!entitlement.canDownloadOriginal) {
     throw new AISUserSafeError("Your account cannot download original WAV files.", "not_entitled", 403);
   }
 
-  return entitlement;
-}
-
-async function requireLocalOwnerActionEntitlement() {
-  const supabase = await createSupabaseServerClient();
-  await requireLocalOwnerDownloadEntitlement(supabase);
+  return entitlement as EntitlementState & { userId: string };
 }
 
 async function loadPublishedSampleAndOriginalAsset(

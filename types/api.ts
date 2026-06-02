@@ -117,9 +117,38 @@ export type WanderInput = SearchInput & {
 };
 
 export type LocalActionKind = "exported_to_dropzone" | "revealed" | "copy_path";
+export type LocalUsageEventName =
+  | "browse_viewed"
+  | "sample_played"
+  | "sample_previewed"
+  | "sample_exported_to_dropzone"
+  | "local_path_revealed"
+  | "local_path_copied"
+  | "sample_added_to_project_crate"
+  | "sample_marked_used"
+  | "sample_favorited"
+  | "collection_created"
+  | "wander_started"
+  | "wander_skipped"
+  | "search_submitted"
+  | "no_results_search";
+export type ProjectCrateSampleStatus = "considered" | "exported" | "used";
+export type LocalCrateSampleStatus = ProjectCrateSampleStatus;
+export type ProjectCrateSyncAction =
+  | "create_crate"
+  | "select_active"
+  | "create_or_select"
+  | "add_sample"
+  | "mark_used"
+  | "sync_exported_path"
+  | "sync_exported_paths";
 
 export type LocalDropzoneExportRequest = {
   sampleId: string;
+  projectName?: string | null;
+  sourceCollectionId?: string | null;
+  sourceCollectionName?: string | null;
+  notes?: string | null;
 };
 
 export type LocalDropzoneExportResponse = {
@@ -128,6 +157,7 @@ export type LocalDropzoneExportResponse = {
   dropzoneTokenizedPath: string;
   sampleId: string;
   action: Extract<LocalActionKind, "exported_to_dropzone">;
+  projectCrate?: ProjectCrateSyncResponse | null;
 };
 
 export type LocalPathActionRequest = {
@@ -146,9 +176,160 @@ export type LocalCopyPathResponse = {
   action: Extract<LocalActionKind, "copy_path">;
 };
 
+export type LocalUsageEventRequest = {
+  event: LocalUsageEventName;
+  sampleId?: string | null;
+  projectName?: string | null;
+  sourceSurface?: "browse" | "detail" | "wander" | "collection" | "admin-preview" | "local-crate" | null;
+  tokenizedPath?: string | null;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type LocalUsageEventResponse = {
+  accepted: true;
+  logged: true;
+  event: LocalUsageEventName;
+  loggedAt: string;
+};
+
+export type ActiveProjectCrateRequest = {
+  projectName: string;
+};
+
+export type ActiveProjectCrateResponse = {
+  activeProjectName: string | null;
+};
+
 export type LocalDropzoneExportApiResponse = ApiResponse<LocalDropzoneExportResponse>;
 export type LocalRevealApiResponse = ApiResponse<LocalRevealResponse>;
 export type LocalCopyPathApiResponse = ApiResponse<LocalCopyPathResponse>;
+export type LocalUsageEventApiResponse = ApiResponse<LocalUsageEventResponse>;
+export type ActiveProjectCrateApiResponse = ApiResponse<ActiveProjectCrateResponse>;
+
+export type ProjectCrateSampleSyncInput = {
+  sampleId: string;
+  sample_id?: string | null;
+  poeticName?: string | null;
+  poetic_name?: string | null;
+  status?: ProjectCrateSampleStatus;
+  exportedPath?: string | null;
+  exported_path?: string | null;
+  exportedPathTokenized?: string | null;
+  exportedPathsTokenized?: string[];
+  sourceCollectionId?: string | null;
+  source_collection_id?: string | null;
+  sourceCollectionName?: string | null;
+  source_collection_name?: string | null;
+  notes?: string | null;
+};
+
+export type ProjectCrateSyncRequest = {
+  projectName?: string | null;
+  crateName?: string | null;
+  daw?: string | null;
+  action?: ProjectCrateSyncAction;
+  sample?: ProjectCrateSampleSyncInput | null;
+  sampleId?: string | null;
+  sample_id?: string | null;
+  poeticName?: string | null;
+  poetic_name?: string | null;
+  status?: ProjectCrateSampleStatus | null;
+  exportedPath?: string | null;
+  exported_path?: string | null;
+  exportedPathTokenized?: string | null;
+  exportedPathsTokenized?: string[];
+  sourceCollectionId?: string | null;
+  source_collection_id?: string | null;
+  sourceCollectionName?: string | null;
+  source_collection_name?: string | null;
+  notes?: string | null;
+};
+
+export type ProjectCrateSampleEntryResponse = {
+  sample_id: string;
+  poetic_name: string | null;
+  status: ProjectCrateSampleStatus;
+  exported_path: string | null;
+  exported_paths: string[];
+  source_collection_id: string | null;
+  source_collection_name: string | null;
+  first_added_at: string;
+  last_updated_at: string;
+  used_in_project: boolean;
+  notes: string | null;
+};
+
+export type ProjectCrateManifestResponse = {
+  schema_version: 1;
+  project_name: string;
+  daw: string;
+  created_at: string;
+  updated_at: string;
+  active: boolean;
+  selected_at: string | null;
+  crate_path: string;
+  exports_path: string;
+  considered_samples_path: string;
+  used_samples_path: string;
+  samples: Record<string, ProjectCrateSampleEntryResponse>;
+};
+
+export type ProjectCrateSyncResponse = {
+  action: ProjectCrateSyncAction;
+  projectName: string;
+  crateTokenizedPath: string;
+  manifestTokenizedPath: string;
+  tokenizedCratePath: string;
+  tokenizedManifestPath: string;
+  tokenizedExportsPath: string;
+  activeProjectName: string;
+  active: boolean;
+  crate: ProjectCrateManifestResponse;
+  manifest: ProjectCrateManifestResponse;
+  entry: ProjectCrateSampleEntryResponse | null;
+  missingExportedPaths: string[];
+};
+
+export type ProjectCrateSyncApiResponse = ApiResponse<ProjectCrateSyncResponse>;
+
+export type LocalProjectCrateEntry = {
+  sampleId: string;
+  poeticName: string;
+  displayTitle: string;
+  bpm: number | null;
+  musicalKey: string | null;
+  status: LocalCrateSampleStatus;
+  exportedPath: string | null;
+  sourceCollectionId: string | null;
+  sourceCollectionName: string | null;
+  firstAddedAt: string;
+  lastUpdatedAt: string;
+  usedInProject: boolean;
+  notes: string | null;
+};
+
+export type LocalCrateSyncRequest = {
+  crateName: string;
+  sample: {
+    sampleId: string;
+    poeticName: string;
+    displayTitle?: string;
+    bpm?: number | null;
+    musicalKey?: string | null;
+  };
+  status: LocalCrateSampleStatus;
+  exportedPath?: string | null;
+  sourceCollectionId?: string | null;
+  sourceCollectionName?: string | null;
+  notes?: string | null;
+};
+
+export type LocalCrateSyncResponse = {
+  crateName: string;
+  entry: LocalProjectCrateEntry;
+};
+
+export type LocalCrateSyncApiResponse = ApiResponse<LocalCrateSyncResponse>;
 
 export type UploadSessionMode = "single" | "bulk";
 

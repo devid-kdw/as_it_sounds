@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { AISUserSafeError } from "@/lib/errors";
 import { exportSampleToFlDropzone } from "@/lib/local-export";
+import { syncProjectCrate } from "@/lib/local-crates";
 
 const localExportRequestSchema = z.object({
   sampleId: z.string().uuid(),
+  projectName: z.string().nullable().optional(),
+  sourceCollectionId: z.string().uuid().nullable().optional(),
+  sourceCollectionName: z.string().nullable().optional(),
+  notes: z.string().nullable().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -20,7 +25,22 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await exportSampleToFlDropzone(parsed.data.sampleId, { request });
-    return NextResponse.json({ ok: true, data: result }, { status: 201 });
+    const projectCrate = parsed.data.projectName
+      ? await syncProjectCrate({
+          projectName: parsed.data.projectName,
+          action: "sync_exported_paths",
+          sample: {
+            sampleId: parsed.data.sampleId,
+            status: "exported",
+            exportedPathTokenized: result.tokenizedPath,
+            sourceCollectionId: parsed.data.sourceCollectionId ?? null,
+            sourceCollectionName: parsed.data.sourceCollectionName ?? null,
+            notes: parsed.data.notes ?? null,
+          },
+        })
+      : null;
+
+    return NextResponse.json({ ok: true, data: { ...result, projectCrate } }, { status: 201 });
   } catch (error) {
     return localActionErrorResponse(error, "local_export_failed", "Unable to export sample to FL Dropzone.");
   }

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { navigationItems } from "@/config/navigation";
+import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 export async function SiteNav() {
-  const canSeeAdmin = await canSeeAdminNav();
-  const visibleItems = navigationItems.filter((item) => item.href !== "/admin" || canSeeAdmin);
+  const [canSeeAdmin, canSeeLocalCrates] = await Promise.all([canSeeAdminNav(), canSeeLocalCratesNav()]);
+  const visibleItems = navigationItems
+    .filter((item) => item.href !== "/admin" || canSeeAdmin)
+    .filter((item) => !("localOwnerOnly" in item && item.localOwnerOnly) || canSeeLocalCrates);
 
   return (
     <header className="border-b border-ais-border-soft bg-[var(--ais-overlay)]">
@@ -26,6 +29,20 @@ export async function SiteNav() {
       </nav>
     </header>
   );
+}
+
+async function canSeeLocalCratesNav() {
+  try {
+    const entitlement = await getEntitlementForCurrentUser();
+
+    return (
+      entitlement.accessMode === "local_owner" &&
+      entitlement.isAuthenticated &&
+      (entitlement.isAdmin || entitlement.subscriptionStatus === "lifetime_granted" || entitlement.canUsePlugin)
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function canSeeAdminNav() {
