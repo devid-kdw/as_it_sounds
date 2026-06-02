@@ -6,6 +6,7 @@ import { Download, FolderPlus, Heart, Pause, Play, Repeat, Volume2 } from "lucid
 import { formatDuration } from "@/components/library/sample-card";
 import { WaveformPreview } from "@/components/player/waveform-preview";
 import { usePlayerStore } from "@/stores/player-store";
+import type { PlayerSurface } from "@/stores/player-store";
 
 const SOURCE_LABELS = {
   "admin-preview": "from Admin preview",
@@ -18,6 +19,7 @@ const SOURCE_LABELS = {
 export function PersistentPlayerShell() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const loadedSampleIdRef = useRef<string | null>(null);
+  const loggedPreviewStartRef = useRef<string | null>(null);
   const lastTimeUpdateRef = useRef(0);
   const activeSampleId = usePlayerStore((state) => state.activeSampleId);
   const activePoeticName = usePlayerStore((state) => state.activePoeticName);
@@ -53,6 +55,7 @@ export function PersistentPlayerShell() {
       audio.removeAttribute("src");
       audio.load();
       loadedSampleIdRef.current = null;
+      loggedPreviewStartRef.current = null;
     }
   }, [activeSampleId]);
 
@@ -99,7 +102,7 @@ export function PersistentPlayerShell() {
       .play()
       .then(() => setLoading(false))
       .catch(() => setError("Preview audio could not be played."));
-  }, [activePreviewUrl, activeSampleId, isPlaying, setError, setLoading]);
+  }, [activePreviewUrl, activeSampleId, isPlaying, setError, setLoading, sourceSurface]);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -125,7 +128,19 @@ export function PersistentPlayerShell() {
       <audio
         hidden
         onCanPlay={() => setLoading(false)}
-        onEnded={() => {
+        onEnded={(event) => {
+          if (activeSampleId && loggedPreviewStartRef.current !== activeSampleId) {
+            loggedPreviewStartRef.current = activeSampleId;
+            logPlayEvent({
+              completed: true,
+              eventType: "ended",
+              sampleId: activeSampleId,
+              secondsPlayed: event.currentTarget.currentTime,
+              sourceSurface,
+            });
+            logWanderPlayedEvent(activeSampleId, sourceSurface);
+          }
+
           if (!isLooping) {
             pause();
             setCurrentTime(0);
@@ -138,7 +153,25 @@ export function PersistentPlayerShell() {
             return;
           }
           lastTimeUpdateRef.current = now;
-          setCurrentTime(event.currentTarget.currentTime);
+          const nextTime = event.currentTarget.currentTime;
+          setCurrentTime(nextTime);
+
+          if (
+            activeSampleId &&
+            activePreviewUrl &&
+            loggedPreviewStartRef.current !== activeSampleId &&
+            nextTime >= meaningfulPlayThreshold(durationSeconds)
+          ) {
+            loggedPreviewStartRef.current = activeSampleId;
+            logPlayEvent({
+              completed: false,
+              eventType: "preview_start",
+              sampleId: activeSampleId,
+              secondsPlayed: nextTime,
+              sourceSurface,
+            });
+            logWanderPlayedEvent(activeSampleId, sourceSurface);
+          }
         }}
         preload="none"
         ref={audioRef}
@@ -252,4 +285,74 @@ function MiniPlaceholderAction({ children, label }: { children: ReactNode; label
       {children}
     </button>
   );
+}
+
+function logPlayEvent({
+  completed,
+  eventType,
+  sampleId,
+  secondsPlayed,
+  sourceSurface,
+}: {
+  completed?: boolean;
+  eventType: "preview_start" | "ended";
+  sampleId: string;
+  secondsPlayed?: number;
+  sourceSurface: PlayerSurface | null;
+}) {
+  const body = JSON.stringify({
+    completed: completed ?? null,
+    eventType,
+    sampleId,
+    secondsPlayed: secondsPlayed ?? null,
+    source: "web",
+    sourceSurface,
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon("/api/play-events", new Blob([body], { type: "application/json" }));
+    return;
+  }
+
+  void fetch("/api/play-events", {
+    body,
+    headers: {
+      "content-type": "application/json",
+    },
+    keepalive: true,
+    method: "POST",
+  }).catch(() => undefined);
+}
+
+function logWanderPlayedEvent(sampleId: string, sourceSurface: PlayerSurface | null) {
+  if (sourceSurface !== "wander") {
+    return;
+  }
+
+  const body = JSON.stringify({
+    action: "played",
+    sampleId,
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon("/api/wander/events", new Blob([body], { type: "application/json" }));
+    return;
+  }
+
+  void fetch("/api/wander/events", {
+    body,
+    headers: {
+      "content-type": "application/json",
+    },
+    keepalive: true,
+    method: "POST",
+  }).catch(() => undefined);
+}
+
+function meaningfulPlayThreshold(durationSeconds: number | null) {
+  if (durationSeconds && durationSeconds > 0) {
+    return Math.min(2, durationSeconds * 0.2);
+  }
+
+  return 2;
 }

@@ -105,6 +105,15 @@ export async function POST(request: NextRequest, context: SimilarRouteContext) {
 
   const admin = createSupabaseAdminClient();
   const userId = await getCurrentUserId();
+  const publishedSamples = await getPublishedSampleIds(admin, [sourceSampleId, clickedSampleId]);
+
+  if (!publishedSamples.has(sourceSampleId) || !publishedSamples.has(clickedSampleId)) {
+    return NextResponse.json(
+      { ok: false, code: "similar_sample_not_found", message: "Similar sample was not found." },
+      { status: 404 },
+    );
+  }
+
   const { error } = await admin.from("similar_sample_events").insert({
     user_id: userId,
     source_sample_id: sourceSampleId,
@@ -117,8 +126,6 @@ export async function POST(request: NextRequest, context: SimilarRouteContext) {
       { status: 500 },
     );
   }
-
-  await incrementSimilarClickCount(admin, clickedSampleId);
 
   return NextResponse.json(
     {
@@ -183,18 +190,12 @@ async function getCurrentUserId() {
   }
 }
 
-async function incrementSimilarClickCount(admin: ReturnType<typeof createSupabaseAdminClient>, sampleId: string) {
-  try {
-    const { data } = await admin.from("sample_stats").select("similar_click_count").eq("sample_id", sampleId).maybeSingle();
+async function getPublishedSampleIds(admin: ReturnType<typeof createSupabaseAdminClient>, sampleIds: string[]) {
+  const { data, error } = await admin.from("samples").select("id").in("id", sampleIds).eq("status", "published");
 
-    await admin
-      .from("sample_stats")
-      .update({
-        similar_click_count: (data?.similar_click_count ?? 0) + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("sample_id", sampleId);
-  } catch {
-    // Discovery click logging should not fail the navigation path.
+  if (error) {
+    return new Set<string>();
   }
+
+  return new Set((data ?? []).map((sample) => sample.id));
 }

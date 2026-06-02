@@ -34,13 +34,30 @@ export async function POST(request: NextRequest) {
   }
 
   const userId = await getCurrentUserId();
+  const shouldLogPlayback =
+    parsed.data.eventType === "play" || parsed.data.eventType === "preview_start" || parsed.data.eventType === "ended";
+
+  if (!shouldLogPlayback) {
+    return NextResponse.json(
+      {
+        ok: true,
+        data: {
+          accepted: true,
+          eventType: parsed.data.eventType,
+          logged: false,
+          sourceSurface: parsed.data.sourceSurface ?? null,
+        },
+      },
+      { status: 202 },
+    );
+  }
 
   try {
     const result = await tryLogPlayEvent({
       sampleId: parsed.data.sampleId,
       source: parsed.data.source,
       secondsPlayed: parsed.data.secondsPlayed ?? null,
-      completed: parsed.data.completed ?? null,
+      completed: parsed.data.completed ?? (parsed.data.eventType === "ended" ? true : null),
       userId,
     });
 
@@ -49,7 +66,9 @@ export async function POST(request: NextRequest) {
         ok: true,
         data: {
           accepted: true,
+          eventType: parsed.data.eventType,
           logged: result.logged,
+          sourceSurface: parsed.data.sourceSurface ?? null,
         },
       },
       { status: 202 },
@@ -60,7 +79,9 @@ export async function POST(request: NextRequest) {
         ok: true,
         data: {
           accepted: true,
+          eventType: parsed.data.eventType,
           logged: false,
+          sourceSurface: parsed.data.sourceSurface ?? null,
         },
       },
       { status: 202 },
