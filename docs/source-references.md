@@ -14,6 +14,7 @@ This implementation repository treats the AIS specification files one level up a
 - `../08_CLAP_Plugin_Architecture_AIS_v1.md`
 - `../09_UI_Design_System_AIS_v1.md`
 - `../10_Local_Development_Producer_Workflow_AIS_v1.md`
+- `../11_Spectral_Fit_Analysis_AIS_v1.md`
 - `../AIS UI Design System/README.md`
 
 ## Phase 0 Sections Read

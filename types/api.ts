@@ -1,4 +1,5 @@
 import type { Database } from "./database.types";
+import type { SampleTaxonomyValue } from "./sample";
 
 export type ApiErrorResponse = {
   ok: false;
@@ -15,6 +16,103 @@ export type ApiSuccessResponse<T> = {
 };
 
 export type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
+
+export type SearchSort =
+  | "relevance"
+  | "newest"
+  | "most_played"
+  | "most_downloaded"
+  | "most_favorited"
+  | "featured"
+  | "random_seeded";
+
+export type SearchSource = "web" | "plugin";
+
+export type SearchInput = {
+  query?: string | null;
+  moods?: string[];
+  categories?: string[];
+  sampleTypes?: string[];
+  bpmMin?: number | null;
+  bpmMax?: number | null;
+  musicalKey?: string | null;
+  loopable?: boolean | null;
+  featuredOnly?: boolean;
+  albumId?: string | null;
+  sort?: SearchSort | null;
+  page?: number | null;
+  pageSize?: number | null;
+  seed?: string | null;
+  source?: SearchSource;
+};
+
+export type SearchSampleAsset = {
+  bucket: string;
+  objectPath: string;
+  publicUrl?: string;
+};
+
+export type SearchSampleResult = {
+  id: string;
+  poeticName: string;
+  displayTitle: string;
+  displayTitleIsCustom: boolean;
+  shortDescription: string | null;
+  category: SampleTaxonomyValue;
+  sampleType: SampleTaxonomyValue;
+  moods: SampleTaxonomyValue[];
+  bpm: number | null;
+  musicalKey: string | null;
+  durationSeconds: number | null;
+  loopable: boolean;
+  featured: boolean;
+  publishedAt: string | null;
+  previewAsset: SearchSampleAsset | null;
+  waveformAsset: SearchSampleAsset | null;
+  previewAssetUrl: string | null;
+  waveformPeaksUrl: string | null;
+  stats?: {
+    playCount: number;
+    downloadCount: number;
+    favoriteCount: number;
+  };
+  score?: number;
+  isFavoritedByCurrentUser: boolean;
+};
+
+export type SuggestedCategory = SampleTaxonomyValue & {
+  weight: number;
+  reason: "mood_suggestion";
+};
+
+export type SearchResponse = {
+  results: SearchSampleResult[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  normalizedQuery: string | null;
+  appliedFilters: SearchInput;
+  suggestedCategories?: SuggestedCategory[];
+};
+
+export type SearchLogInput = {
+  userId?: string | null;
+  source?: SearchSource | null;
+  query?: string | null;
+  filters?: SearchInput;
+  resultCount?: number | null;
+  clickedSampleId?: string | null;
+};
+
+export type SimilarOptions = {
+  limit?: number | null;
+  source?: SearchSource | null;
+};
+
+export type WanderInput = SearchInput & {
+  limit?: number | null;
+};
 
 export type UploadSessionMode = "single" | "bulk";
 

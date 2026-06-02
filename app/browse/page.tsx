@@ -1,31 +1,10 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { Search, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
+import { BrowseSearchControls } from "@/app/browse/browse-search-controls";
 import { SampleGrid } from "@/components/library/sample-grid";
 import { EmptyState } from "@/components/ui/empty-state";
-import { getPublishedSamples } from "@/lib/data/samples";
-import type { PublishedSampleSort } from "@/types/sample";
-
-const moods = [
-  "melancholic",
-  "tense",
-  "peaceful",
-  "mysterious",
-  "euphoric",
-  "dark",
-  "organic",
-  "industrial",
-  "fragile",
-  "ritual",
-  "distant",
-  "warm",
-  "cold",
-  "haunted",
-  "intimate",
-];
-
-const categories = ["field_recordings", "loops", "textures", "drones", "percussive", "one_shots", "processed"];
-const sorts: PublishedSampleSort[] = ["newest", "featured", "oldest", "title", "duration"];
+import { parseSearchParams, searchSamples, serializeSearchParams } from "@/lib/data/search";
+import type { SearchInput, SearchSort } from "@/types/api";
 
 type BrowsePageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -33,21 +12,9 @@ type BrowsePageProps = {
 
 export default async function BrowsePage({ searchParams }: BrowsePageProps) {
   const params = await searchParams;
-  const query = single(params?.q);
-  const mood = single(params?.mood);
-  const category = single(params?.category);
-  const sort = normalizeSort(single(params?.sort));
-  const offset = normalizeOffset(single(params?.offset));
-  const result = await getPublishedSamples({
-    query,
-    moodSlug: mood,
-    categorySlug: category,
-    sort,
-    limit: 24,
-    offset,
-  });
-  const nextOffset = offset + result.limit;
-  const prevOffset = Math.max(0, offset - result.limit);
+  const input = parseSearchParams(params ?? {});
+  const response = await searchSamples(input);
+  const hasActiveSearch = hasVisibleSearchState(response.appliedFilters);
 
   return (
     <section className="grid gap-6 pb-24">
@@ -59,113 +26,46 @@ export default async function BrowsePage({ searchParams }: BrowsePageProps) {
         </p>
       </div>
 
-      <form className="grid gap-4 rounded-ais-lg border border-ais-border-soft bg-ais-surface p-4">
-        <label className="grid gap-2">
-          <span className="ais-meta text-ais-faint">search</span>
-          <span className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ais-faint" size={18} aria-hidden="true" />
-            <input
-              className="ais-input pl-10"
-              defaultValue={query ?? ""}
-              name="q"
-              placeholder="search by mood, memory, texture..."
-            />
-          </span>
-        </label>
+      <BrowseSearchControls initialInput={response.appliedFilters} suggestedCategories={response.suggestedCategories ?? []} />
 
-        <div className="grid gap-2">
-          <p className="ais-meta text-ais-faint">mood rail</p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {moods.map((moodSlug) => (
-              <FilterLink active={mood === moodSlug} href={hrefWith(params, { mood: moodSlug, offset: null })} key={moodSlug}>
-                {moodSlug}
-              </FilterLink>
-            ))}
-          </div>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ActiveFilters input={response.appliedFilters} />
+        <p className="ais-meta text-xs text-ais-faint">
+          {response.total === 1 ? "1 published sound" : `${response.total} published sounds`}
+        </p>
+      </div>
 
-        <div className="grid gap-2">
-          <p className="ais-meta text-ais-faint">category rail</p>
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {categories.map((categorySlug) => (
-              <FilterLink
-                active={category === categorySlug}
-                href={hrefWith(params, { category: categorySlug, offset: null })}
-                key={categorySlug}
-              >
-                {categorySlug.replaceAll("_", " ")}
-              </FilterLink>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-end justify-between gap-3 border-t border-ais-border-soft pt-4">
-          <label className="grid min-w-48 gap-2">
-            <span className="ais-meta flex items-center gap-2 text-ais-faint">
-              <SlidersHorizontal size={15} aria-hidden="true" />
-              sort
-            </span>
-            <select className="ais-input" defaultValue={sort} name="sort">
-              {sorts.map((sortValue) => (
-                <option key={sortValue} value={sortValue}>{sortValue}</option>
-              ))}
-            </select>
-          </label>
-          <div className="flex gap-2">
-            <Link className="rounded-ais-sm border border-ais-border-soft px-4 py-2 text-sm text-ais-muted" href="/browse">
-              Clear
-            </Link>
-            <button className="rounded-ais-sm border border-ais-amber bg-ais-amber px-4 py-2 font-medium text-ais-bg" type="submit">
-              Apply
-            </button>
-          </div>
-        </div>
-      </form>
-
-      <ActiveFilters query={query} mood={mood} category={category} sort={sort} />
-
-      {result.items.length > 0 ? (
-        <SampleGrid samples={result.items} sourceSurface="browse" />
+      {response.results.length > 0 ? (
+        <SampleGrid samples={response.results} sourceSurface="browse" />
       ) : (
         <EmptyState
-          eyebrow="no results"
-          title="No published samples match this path"
-          description="Try clearing the search text, changing mood, or stepping out of the selected category."
+          eyebrow={hasActiveSearch ? "no results" : "empty library"}
+          title={hasActiveSearch ? "Nothing matched this path" : "No published samples are ready yet"}
+          description={
+            hasActiveSearch
+              ? "Clear one filter, try a mood instead, or search with a broader atmospheric word."
+              : "Published sounds will appear here once the archive opens."
+          }
         />
       )}
 
-      <nav className="flex flex-wrap justify-between gap-3" aria-label="Browse pagination">
-        {offset > 0 ? (
-          <Link className="rounded-ais-sm border border-ais-border-soft px-4 py-2 text-ais-muted" href={hrefWith(params, { offset: String(prevOffset) })}>
-            Previous page
-          </Link>
-        ) : <span />}
-        {result.hasMore ? (
-          <Link className="rounded-ais-sm border border-ais-amber px-4 py-2 text-ais-amber" href={hrefWith(params, { offset: String(nextOffset) })}>
-            Next page
-          </Link>
-        ) : null}
-      </nav>
+      <Pagination input={response.appliedFilters} hasMore={response.hasMore} />
     </section>
   );
 }
 
-function ActiveFilters({
-  category,
-  mood,
-  query,
-  sort,
-}: {
-  category: string | null;
-  mood: string | null;
-  query: string | null;
-  sort: PublishedSampleSort;
-}) {
+function ActiveFilters({ input }: { input: SearchInput }) {
   const chips = [
-    query ? `search: ${query}` : null,
-    mood ? `mood: ${mood}` : null,
-    category ? `category: ${category.replaceAll("_", " ")}` : null,
-    sort !== "newest" ? `sort: ${sort}` : null,
+    input.query ? `search: ${input.query}` : null,
+    ...(input.moods ?? []).map((mood) => `mood: ${mood}`),
+    ...(input.categories ?? []).map((category) => `category: ${category.replaceAll("_", " ")}`),
+    ...(input.sampleTypes ?? []).map((type) => `type: ${type.replaceAll("_", " ")}`),
+    input.bpmMin ? `min: ${input.bpmMin} bpm` : null,
+    input.bpmMax ? `max: ${input.bpmMax} bpm` : null,
+    input.musicalKey ? `key: ${input.musicalKey}` : null,
+    input.loopable ? "loopable" : null,
+    input.featuredOnly ? "featured" : null,
+    input.sort && input.sort !== defaultSort(input) ? `sort: ${input.sort.replaceAll("_", " ")}` : null,
   ].filter(Boolean);
 
   if (chips.length === 0) {
@@ -183,53 +83,56 @@ function ActiveFilters({
   );
 }
 
-function FilterLink({ active, children, href }: { active: boolean; children: ReactNode; href: string }) {
+function Pagination({ hasMore, input }: { hasMore: boolean; input: SearchInput }) {
+  const currentPage = input.page ?? 1;
+
+  if (currentPage <= 1 && !hasMore) {
+    return null;
+  }
+
   return (
-    <Link
-      className={[
-        "ais-meta whitespace-nowrap rounded-full border px-4 py-2 text-sm transition duration-ais-base",
-        active
-          ? "border-ais-amber bg-ais-amber text-ais-bg"
-          : "border-ais-border-soft bg-ais-panel text-ais-muted hover:border-ais-moss hover:text-ais-text",
-      ].join(" ")}
-      href={href}
-    >
-      {children}
-    </Link>
+    <nav className="flex flex-wrap justify-between gap-3" aria-label="Browse pagination">
+      {currentPage > 1 ? (
+        <Link
+          className="inline-flex items-center gap-2 rounded-ais-sm border border-ais-border-soft px-4 py-2 text-ais-muted transition duration-ais-base hover:border-ais-amber hover:text-ais-text"
+          href={browseHref({ ...input, page: currentPage - 1 })}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Previous page
+        </Link>
+      ) : <span />}
+      {hasMore ? (
+        <Link
+          className="inline-flex items-center gap-2 rounded-ais-sm border border-ais-amber px-4 py-2 text-ais-amber transition duration-ais-base hover:bg-ais-panel"
+          href={browseHref({ ...input, page: currentPage + 1 })}
+        >
+          Next page
+          <ArrowRight size={16} aria-hidden="true" />
+        </Link>
+      ) : null}
+    </nav>
   );
 }
 
-function single(value: string | string[] | undefined) {
-  return Array.isArray(value) ? value[0] ?? null : value ?? null;
+function browseHref(input: SearchInput) {
+  const params = serializeSearchParams(input);
+  return params ? `/browse?${params}` : "/browse";
 }
 
-function normalizeSort(value: string | null): PublishedSampleSort {
-  return sorts.includes(value as PublishedSampleSort) ? (value as PublishedSampleSort) : "newest";
+function hasVisibleSearchState(input: SearchInput) {
+  return Boolean(
+    input.query ||
+      input.moods?.length ||
+      input.categories?.length ||
+      input.sampleTypes?.length ||
+      input.bpmMin ||
+      input.bpmMax ||
+      input.musicalKey ||
+      input.loopable ||
+      input.featuredOnly,
+  );
 }
 
-function normalizeOffset(value: string | null) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : 0;
-}
-
-function hrefWith(
-  params: Record<string, string | string[] | undefined> | undefined,
-  updates: Record<string, string | null>,
-) {
-  const url = new URLSearchParams();
-  for (const [key, value] of Object.entries(params ?? {})) {
-    const singleValue = single(value);
-    if (singleValue) {
-      url.set(key, singleValue);
-    }
-  }
-  for (const [key, value] of Object.entries(updates)) {
-    if (value === null) {
-      url.delete(key);
-    } else {
-      url.set(key, value);
-    }
-  }
-  const query = url.toString();
-  return query ? `/browse?${query}` : "/browse";
+function defaultSort(input: SearchInput): SearchSort {
+  return input.query ? "relevance" : "newest";
 }
