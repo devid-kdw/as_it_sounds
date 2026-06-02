@@ -3,6 +3,7 @@ import "server-only";
 import { notFound, redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database.types";
+import type { AccessMode, BillingMode } from "@/types/access";
 import { AISUserSafeError } from "@/lib/errors";
 import { createSupabaseAdminClient, type SupabaseDatabaseClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -10,8 +11,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export type ProfileRow = Database["public"]["Tables"]["profiles"]["Row"];
 export type SubscriptionRow = Database["public"]["Tables"]["subscriptions"]["Row"];
 export type Profile = ProfileRow;
-export type AccessMode = "local_owner" | "free_launch" | "paid_test" | "paid_live";
-export type BillingMode = "disabled" | "test" | "live";
+export type { AccessMode, BillingMode };
 
 export function getAccessMode(): AccessMode {
   return (process.env.AIS_ACCESS_MODE as AccessMode | undefined) ?? "local_owner";

@@ -15,9 +15,16 @@ type SampleCardProps = {
   sample: SampleCardView;
   sourceSurface?: PlayerSurface;
   featured?: boolean;
+  similarSourceSampleId?: string;
 };
 
-export function SampleCard({ entitlement, featured = false, sample, sourceSurface = "browse" }: SampleCardProps) {
+export function SampleCard({
+  entitlement,
+  featured = false,
+  sample,
+  similarSourceSampleId,
+  sourceSurface = "browse",
+}: SampleCardProps) {
   const activeSampleId = usePlayerStore((state) => state.activeSampleId);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const setActiveSample = usePlayerStore((state) => state.setActiveSample);
@@ -85,6 +92,7 @@ export function SampleCard({ entitlement, featured = false, sample, sourceSurfac
           <Link
             className="ais-name block break-words text-3xl leading-tight text-ais-text underline-offset-4 transition duration-ais-base hover:text-ais-pale-green hover:underline"
             href={sampleDetailRoute(sample.poeticName)}
+            onClick={() => logSimilarClick(similarSourceSampleId, sample.id)}
           >
             {sample.displayTitle}
           </Link>
@@ -141,6 +149,34 @@ export function SampleCard({ entitlement, featured = false, sample, sourceSurfac
       </div>
     </article>
   );
+}
+
+function logSimilarClick(sourceSampleId: string | undefined, clickedSampleId: string) {
+  if (!sourceSampleId || sourceSampleId === clickedSampleId) {
+    return;
+  }
+
+  const body = JSON.stringify({
+    clickedSampleId,
+    source: "web",
+  });
+
+  if (navigator.sendBeacon) {
+    navigator.sendBeacon(
+      `/api/similar/${encodeURIComponent(sourceSampleId)}`,
+      new Blob([body], { type: "application/json" }),
+    );
+    return;
+  }
+
+  void fetch(`/api/similar/${encodeURIComponent(sourceSampleId)}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body,
+    keepalive: true,
+  }).catch(() => undefined);
 }
 
 export function formatDuration(durationSeconds: number | null) {

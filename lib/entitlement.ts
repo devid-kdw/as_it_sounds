@@ -1,16 +1,17 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AccessMode, BillingMode } from "@/types/access";
 import type { Database } from "@/types/database.types";
 import {
   ensureProfileAndSubscription,
   type ProfileRow,
   type SubscriptionRow,
 } from "@/lib/auth";
+import { AISUserSafeError } from "@/lib/errors";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export type AccessMode = "local_owner" | "free_launch" | "paid_test" | "paid_live";
-export type BillingMode = "disabled" | "test" | "live";
+export type { AccessMode, BillingMode };
 export type SubscriptionStatus = Database["public"]["Enums"]["subscription_status"];
 
 export type EntitlementState = {
@@ -228,7 +229,7 @@ async function getProfile(client: SupabaseClient<Database>, userId: string): Pro
   const { data, error } = await client.from("profiles").select("*").eq("id", userId).maybeSingle();
 
   if (error) {
-    throw error;
+    throw new AISUserSafeError("Unable to load your profile.", "profile_lookup_failed", 500);
   }
 
   return data;
@@ -245,7 +246,7 @@ async function getSubscription(
     .maybeSingle();
 
   if (error) {
-    throw error;
+    throw new AISUserSafeError("Unable to load your subscription.", "subscription_lookup_failed", 500);
   }
 
   return data;

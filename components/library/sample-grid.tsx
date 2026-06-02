@@ -7,13 +7,20 @@ type SampleGridProps = {
   entitlement: SampleActionEntitlement;
   samples: SampleCardView[];
   sourceSurface?: PlayerSurface;
+  similarSourceSampleId?: string;
 };
 
-export function SampleGrid({ entitlement, samples, sourceSurface = "browse" }: SampleGridProps) {
+export function SampleGrid({ entitlement, samples, similarSourceSampleId, sourceSurface = "browse" }: SampleGridProps) {
   return (
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {samples.map((sample) => (
-        <SampleCard entitlement={entitlement} key={sample.id} sample={sample} sourceSurface={sourceSurface} />
+        <SampleCard
+          entitlement={entitlement}
+          key={sample.id}
+          sample={sample}
+          similarSourceSampleId={similarSourceSampleId}
+          sourceSurface={sourceSurface}
+        />
       ))}
     </div>
   );

@@ -1,6 +1,7 @@
 import "server-only";
 
 import { AISUserSafeError } from "@/lib/errors";
+import { getMoodsForSamples, taxonomyValue } from "@/lib/data/taxonomy";
 import { createStorageProvider, type StorageProvider } from "@/lib/storage";
 import type { SupabaseDatabaseClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
@@ -16,7 +17,6 @@ import type {
   WanderInput,
 } from "@/types/api";
 import type { Json } from "@/types/database.types";
-import type { SampleTaxonomyValue } from "@/types/sample";
 
 export const SEARCH_DEFAULT_PAGE_SIZE = 24;
 export const SEARCH_MAX_PAGE_SIZE = 60;
@@ -41,6 +41,10 @@ const SEARCH_SORTS = [
 type SearchDataOptions = {
   supabase?: SupabaseDatabaseClient;
   storage?: StorageProvider;
+};
+
+type DiscoveryDataOptions = SearchDataOptions & {
+  userId?: string | null;
 };
 
 type NormalizedSearchInput = {
@@ -78,6 +82,21 @@ type SearchSamplesRpcArgs = {
   p_seed: string | null;
 };
 
+type SimilarSamplesRpcArgs = {
+  p_sample_id: string;
+  p_limit: number;
+  p_album_context: boolean;
+};
+
+type WanderSamplesRpcArgs = {
+  p_mood: string | null;
+  p_category: string | null;
+  p_exclude: string[] | null;
+  p_limit: number;
+  p_user_id: string | null;
+  p_source: "web" | "plugin";
+};
+
 type SearchSamplesRpcRow = {
   sample_id: string;
   poetic_name: string;
@@ -105,22 +124,21 @@ type SearchSamplesRpcRow = {
   total_count: number | string | null;
 };
 
-type SearchSamplesRpcClient = SupabaseDatabaseClient & {
-  rpc: (
-    fn: "search_samples",
-    args: SearchSamplesRpcArgs,
-  ) => Promise<{ data: SearchSamplesRpcRow[] | null; error: { message?: string } | null }>;
-};
-
-type MoodRow = {
-  sample_id: string;
-  mood_slug: string;
-  sort_order: number;
-};
-
-type LookupRow = {
-  slug: string;
-  label: string;
+type DiscoveryRpcClient = SupabaseDatabaseClient & {
+  rpc: {
+    (
+      fn: "search_samples",
+      args: SearchSamplesRpcArgs,
+    ): Promise<{ data: SearchSamplesRpcRow[] | null; error: { message?: string } | null }>;
+    (
+      fn: "similar_samples",
+      args: SimilarSamplesRpcArgs,
+    ): Promise<{ data: SearchSamplesRpcRow[] | null; error: { message?: string } | null }>;
+    (
+      fn: "wander_samples",
+      args: WanderSamplesRpcArgs,
+    ): Promise<{ data: SearchSamplesRpcRow[] | null; error: { message?: string } | null }>;
+  };
 };
 
 type NormalizedQuery = {
@@ -130,6 +148,10 @@ type NormalizedQuery = {
 
 type SearchParamsRecord = Record<string, string | string[] | undefined>;
 type SearchParamsLike = URLSearchParams | SearchParamsRecord;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DISCOVERY_MAX_LIMIT = 12;
+const WANDER_MAX_EXCLUSIONS = 20;
 
 export function parseSearchParams(params: SearchParamsLike): SearchInput {
   return normalizeSearchInput({
@@ -224,7 +246,7 @@ export async function searchSamples(
   const page = appliedFilters.page;
   const pageSize = appliedFilters.pageSize;
   const sort = appliedFilters.sort ?? (appliedFilters.query ? "relevance" : "newest");
-  const { data, error } = await (supabase as SearchSamplesRpcClient).rpc("search_samples", {
+  const { data, error } = await (supabase as DiscoveryRpcClient).rpc("search_samples", {
     p_query: appliedFilters.query,
     p_moods: appliedFilters.moods.length > 0 ? appliedFilters.moods : null,
     p_categories: appliedFilters.categories.length > 0 ? appliedFilters.categories : null,
@@ -327,47 +349,50 @@ export async function getSimilarSamples(
   options: SimilarOptions & SearchDataOptions = {},
 ): Promise<SearchSampleResult[]> {
   const supabase = options.supabase ?? (await createSupabaseServerClient());
-  const { data: sample, error } = await supabase
-    .from("samples")
-    .select("category_slug,sample_type_slug")
-    .eq("status", "published")
-    .eq("id", sampleId)
-    .maybeSingle();
+  const storage = options.storage ?? createStorageProvider(supabase);
+  const normalizedSampleId = normalizeUuid(sampleId);
 
-  if (error || !sample) {
-    return [];
+  if (!normalizedSampleId) {
+    throw new AISUserSafeError("Sample ID must be a valid UUID.", "invalid_sample_id", 400);
   }
 
-  const limit = options.limit ?? 6;
-  const response = await searchSamples(
-    {
-      categories: [sample.category_slug],
-      sampleTypes: [sample.sample_type_slug],
-      pageSize: limit + 1,
-      sort: "relevance",
-      source: options.source ?? "web",
-    },
-    { supabase, storage: options.storage },
-  );
+  const limit = clampInteger(options.limit, 1, DISCOVERY_MAX_LIMIT, 6);
+  const { data, error } = await (supabase as DiscoveryRpcClient).rpc("similar_samples", {
+    p_sample_id: normalizedSampleId,
+    p_limit: limit,
+    p_album_context: options.albumContext === true,
+  });
 
-  return response.results.filter((result) => result.id !== sampleId).slice(0, limit);
+  if (error) {
+    throw new AISUserSafeError("Unable to load similar samples.", "similar_samples_failed", 500);
+  }
+
+  return buildRpcSearchSampleResults(data ?? [], supabase, storage);
 }
 
 export async function getWanderSamples(
   input: WanderInput = {},
-  options: SearchDataOptions = {},
+  options: DiscoveryDataOptions = {},
 ): Promise<SearchSampleResult[]> {
-  const response = await searchSamples(
-    {
-      ...input,
-      page: 1,
-      pageSize: input.limit ?? input.pageSize ?? SEARCH_DEFAULT_PAGE_SIZE,
-      sort: "random_seeded",
-    },
-    options,
-  );
+  const supabase = options.supabase ?? (await createSupabaseServerClient());
+  const storage = options.storage ?? createStorageProvider(supabase);
+  const normalized = normalizeSearchInput(input);
+  const limit = clampInteger(input.limit ?? input.pageSize, 1, DISCOVERY_MAX_LIMIT, 1);
+  const userId = normalizeUuid(options.userId) ?? (await getCurrentUserId(supabase));
+  const { data, error } = await (supabase as DiscoveryRpcClient).rpc("wander_samples", {
+    p_mood: normalized.moods[0] ?? null,
+    p_category: normalized.categories[0] ?? null,
+    p_exclude: normalizeUuidList(input.excludeSampleIds).slice(0, WANDER_MAX_EXCLUSIONS),
+    p_limit: limit,
+    p_user_id: userId,
+    p_source: normalized.source,
+  });
 
-  return response.results;
+  if (error) {
+    throw new AISUserSafeError("Unable to load Wander samples.", "wander_samples_failed", 500);
+  }
+
+  return buildRpcSearchSampleResults(data ?? [], supabase, storage);
 }
 
 export async function logSearchEvent(input: SearchLogInput): Promise<void> {
@@ -442,77 +467,12 @@ function buildRpcAssetRef(bucket: string | null, objectPath: string | null, stor
   };
 }
 
-async function getMoodsForSamples(
-  sampleIds: string[],
-  supabase: SupabaseDatabaseClient,
-): Promise<Map<string, SampleTaxonomyValue[]>> {
-  const moodsBySample = new Map<string, SampleTaxonomyValue[]>();
-  const uniqueSampleIds = uniqueStrings(sampleIds);
-
-  if (uniqueSampleIds.length === 0) {
-    return moodsBySample;
-  }
-
-  const { data: moodRows, error } = await supabase
-    .from("sample_moods")
-    .select("sample_id,mood_slug,sort_order")
-    .in("sample_id", uniqueSampleIds)
-    .order("sort_order", { ascending: true });
-
-  if (error) {
-    throw new AISUserSafeError("Unable to load sample moods.", "search_moods_failed", 500);
-  }
-
-  const rows = (moodRows ?? []) as MoodRow[];
-  const labels = await getLookupLabels("moods", rows.map((row) => row.mood_slug), supabase);
-
-  for (const row of rows) {
-    const current = moodsBySample.get(row.sample_id) ?? [];
-    current.push(taxonomyValue(row.mood_slug, labels.get(row.mood_slug)));
-    moodsBySample.set(row.sample_id, current);
-  }
-
-  return moodsBySample;
-}
-
-async function getLookupLabels(
-  table: "moods",
-  slugs: string[],
-  supabase: SupabaseDatabaseClient,
-): Promise<Map<string, string>> {
-  const labels = new Map<string, string>();
-  const uniqueSlugs = uniqueStrings(slugs);
-
-  if (uniqueSlugs.length === 0) {
-    return labels;
-  }
-
-  const { data, error } = await supabase.from(table).select("slug,label").in("slug", uniqueSlugs);
-
-  if (error) {
-    throw new AISUserSafeError("Unable to load search taxonomy.", "search_taxonomy_failed", 500);
-  }
-
-  for (const row of (data ?? []) as LookupRow[]) {
-    labels.set(row.slug, row.label);
-  }
-
-  return labels;
-}
-
 function getSafePublicUrl(bucket: string, objectPath: string, storage: StorageProvider) {
   try {
     return storage.getPublicUrl({ bucket, objectPath });
   } catch {
     return undefined;
   }
-}
-
-function taxonomyValue(slug: string, label?: string | null): SampleTaxonomyValue {
-  return {
-    slug,
-    label: label ?? titleizeSlug(slug),
-  };
 }
 
 function parseCsvParam(value: string | null) {
@@ -580,6 +540,10 @@ function uniqueStrings(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function normalizeUuidList(values?: string[] | null) {
+  return uniqueStrings((values ?? []).map((value) => normalizeUuid(value)).filter((value): value is string => Boolean(value)));
+}
+
 function normalizeMusicalKey(value?: string | null) {
   const normalized = (value ?? "").trim().replace(/[^a-zA-Z0-9#bm_-]/g, "");
   return normalized || null;
@@ -587,9 +551,7 @@ function normalizeMusicalKey(value?: string | null) {
 
 function normalizeUuid(value?: string | null) {
   const normalized = (value ?? "").trim().toLowerCase();
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(normalized)
-    ? normalized
-    : null;
+  return UUID_PATTERN.test(normalized) ? normalized : null;
 }
 
 function normalizeSeed(value?: string | null) {
@@ -633,6 +595,18 @@ function titleizeSlug(slug: string) {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+async function getCurrentUserId(supabase: SupabaseDatabaseClient) {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    return user?.id ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function buildPrivacySafeLogFilters(filters: NormalizedSearchInput): Json {

@@ -107,11 +107,13 @@ export type SearchLogInput = {
 
 export type SimilarOptions = {
   limit?: number | null;
+  albumContext?: boolean | null;
   source?: SearchSource | null;
 };
 
 export type WanderInput = SearchInput & {
   limit?: number | null;
+  excludeSampleIds?: string[];
 };
 
 export type LocalActionKind = "exported_to_dropzone" | "revealed" | "copy_path";

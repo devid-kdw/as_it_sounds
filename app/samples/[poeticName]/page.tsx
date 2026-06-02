@@ -2,9 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { SampleCard, formatDuration } from "@/components/library/sample-card";
+import { SampleGrid } from "@/components/library/sample-grid";
 import { WaveformPreview } from "@/components/player/waveform-preview";
 import { SampleActions } from "@/components/sample-actions/sample-actions";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getSimilarSamples } from "@/lib/data/search";
 import { getSampleByPoeticName } from "@/lib/data/samples";
 import { getEntitlementForCurrentUser } from "@/lib/entitlement";
 import { routes } from "@/lib/routes";
@@ -36,6 +38,8 @@ export default async function SampleDetailPage({ params }: SampleDetailPageProps
   if (!sample) {
     notFound();
   }
+
+  const similarSamples = await getSimilarSamples(sample.id, { limit: 6, source: "web" });
 
   return (
     <article className="grid gap-8 pb-24">
@@ -115,11 +119,36 @@ export default async function SampleDetailPage({ params }: SampleDetailPageProps
         <SampleCard entitlement={entitlement} sample={sample} sourceSurface="detail" featured />
       </section>
 
-      <EmptyState
-        eyebrow="similar samples"
-        title="Similar listening paths arrive in Phase 11"
-        description="This placeholder stays visible until similarity scoring and related sample panels are implemented."
-      />
+      <section className="grid gap-4">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <p className="ais-meta text-ais-amber">similar samples</p>
+            <h2 className="ais-title mt-2 text-3xl text-ais-text">Keep listening nearby</h2>
+          </div>
+          {similarSamples.length > 0 ? (
+            <Link
+              className="text-sm text-ais-amber underline-offset-4 hover:underline"
+              href={`/browse?cat=${encodeURIComponent(sample.category.slug)}&type=${encodeURIComponent(sample.sampleType.slug)}`}
+            >
+              Open related
+            </Link>
+          ) : null}
+        </div>
+        {similarSamples.length > 0 ? (
+          <SampleGrid
+            entitlement={entitlement}
+            samples={similarSamples}
+            similarSourceSampleId={sample.id}
+            sourceSurface="detail"
+          />
+        ) : (
+          <EmptyState
+            eyebrow="similar samples"
+            title="No similar samples are published yet"
+            description="Related sounds will appear here when matching samples are available."
+          />
+        )}
+      </section>
 
       <div>
         <Link className="text-sm text-ais-amber underline-offset-4 hover:underline" href={routes.browse}>

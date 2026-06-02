@@ -2,6 +2,7 @@ import "server-only";
 
 import { AISUserSafeError } from "@/lib/errors";
 import { getPublicAssetUrlsForSamples } from "@/lib/data/sample-assets";
+import { getLookupLabels, getMoodsForSamples, taxonomyValue } from "@/lib/data/taxonomy";
 import type { PublicTableRow, SupabaseDatabaseClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type {
@@ -10,7 +11,6 @@ import type {
   PublishedSampleSort,
   SampleCardView,
   SampleDetailView,
-  SampleTaxonomyValue,
 } from "@/types/sample";
 
 const DEFAULT_PUBLIC_SAMPLE_LIMIT = 24;
@@ -34,17 +34,6 @@ type SampleRow = Pick<
   | "featured"
   | "published_at"
 >;
-
-type MoodRow = {
-  sample_id: string;
-  mood_slug: string;
-  sort_order: number;
-};
-
-type LookupRow = {
-  slug: string;
-  label: string;
-};
 
 type SampleDataOptions = {
   supabase?: SupabaseDatabaseClient;
@@ -216,8 +205,8 @@ async function buildSampleCardViews(rows: SampleRow[], supabase: SupabaseDatabas
       displayTitle: row.display_title,
       displayTitleIsCustom: row.display_title_is_custom,
       shortDescription: row.short_description,
-      category: taxonomyValue(row.category_slug, categoryLabels),
-      sampleType: taxonomyValue(row.sample_type_slug, sampleTypeLabels),
+      category: taxonomyValue(row.category_slug, categoryLabels.get(row.category_slug)),
+      sampleType: taxonomyValue(row.sample_type_slug, sampleTypeLabels.get(row.sample_type_slug)),
       moods: moodsBySample.get(row.id) ?? [],
       bpm: row.bpm,
       musicalKey: row.musical_key,
@@ -229,63 +218,6 @@ async function buildSampleCardViews(rows: SampleRow[], supabase: SupabaseDatabas
       isFavoritedByCurrentUser: false,
     };
   });
-}
-
-async function getLookupLabels(
-  table: "categories" | "sample_types" | "moods",
-  slugs: string[],
-  supabase: SupabaseDatabaseClient,
-): Promise<Map<string, string>> {
-  const uniqueSlugs = [...new Set(slugs.filter(Boolean))];
-  const labels = new Map<string, string>();
-
-  if (uniqueSlugs.length === 0) {
-    return labels;
-  }
-
-  const { data, error } = await supabase.from(table).select("slug,label").in("slug", uniqueSlugs);
-
-  if (error) {
-    throw new AISUserSafeError("Unable to load sample taxonomy.", "sample_taxonomy_failed", 500);
-  }
-
-  for (const row of (data ?? []) as LookupRow[]) {
-    labels.set(row.slug, row.label);
-  }
-
-  return labels;
-}
-
-async function getMoodsForSamples(
-  sampleIds: string[],
-  supabase: SupabaseDatabaseClient,
-): Promise<Map<string, SampleTaxonomyValue[]>> {
-  const moodsBySample = new Map<string, SampleTaxonomyValue[]>();
-
-  if (sampleIds.length === 0) {
-    return moodsBySample;
-  }
-
-  const { data: moodRows, error: moodError } = await supabase
-    .from("sample_moods")
-    .select("sample_id,mood_slug,sort_order")
-    .in("sample_id", sampleIds)
-    .order("sort_order", { ascending: true });
-
-  if (moodError) {
-    throw new AISUserSafeError("Unable to load sample moods.", "sample_moods_failed", 500);
-  }
-
-  const rows = (moodRows ?? []) as MoodRow[];
-  const moodLabels = await getLookupLabels("moods", rows.map((row) => row.mood_slug), supabase);
-
-  for (const row of rows) {
-    const moods = moodsBySample.get(row.sample_id) ?? [];
-    moods.push(taxonomyValue(row.mood_slug, moodLabels));
-    moodsBySample.set(row.sample_id, moods);
-  }
-
-  return moodsBySample;
 }
 
 async function getMoodFilteredSampleIds(
@@ -306,13 +238,6 @@ async function getMoodFilteredSampleIds(
   }
 
   return [...new Set((data ?? []).map((row) => row.sample_id))];
-}
-
-function taxonomyValue(slug: string, labels: Map<string, string>): SampleTaxonomyValue {
-  return {
-    slug,
-    label: labels.get(slug) ?? humanizeSlug(slug),
-  };
 }
 
 type OrderableQuery = {
@@ -370,12 +295,4 @@ function normalizePoeticName(poeticName: string): string {
 function normalizePublicSearch(query: string | null | undefined): string | null {
   const safeQuery = query?.trim().replace(/[%,()]/g, " ").replace(/\s+/g, " ").slice(0, 80) ?? "";
   return safeQuery.length > 0 ? safeQuery : null;
-}
-
-function humanizeSlug(slug: string): string {
-  return slug
-    .split("_")
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
 }

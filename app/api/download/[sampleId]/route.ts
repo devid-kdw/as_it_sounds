@@ -51,10 +51,10 @@ export async function GET(request: NextRequest, context: DownloadRouteContext) {
     const originalAsset = await getOriginalWavAsset(admin, sample.id);
     const storage = createStorageProvider(admin);
     const expiresAt = new Date(Date.now() + ORIGINAL_DOWNLOAD_EXPIRES_IN_SECONDS * 1000).toISOString();
-    const originalRef = Object.fromEntries([
-      ["bucket", originalAsset.bucket],
-      ["objectPath", originalAsset.object_path],
-    ]) as StoredObjectRef;
+    const originalRef: StoredObjectRef = {
+      ["bucket"]: originalAsset.bucket,
+      ["objectPath"]: originalAsset.object_path,
+    };
     const url = await storage.createSignedDownloadUrl(
       originalRef,
       120,
@@ -69,6 +69,7 @@ export async function GET(request: NextRequest, context: DownloadRouteContext) {
       source,
       subscriptionStatus: entitlement.subscriptionStatus,
       fileVersion: originalAsset.checksum_sha256 ?? originalAsset.updated_at,
+      ip: getRequestIp(request),
       userAgent: request.headers.get("user-agent"),
     });
 
@@ -143,6 +144,7 @@ async function logDownload(
     source: DownloadSource;
     subscriptionStatus: Database["public"]["Enums"]["subscription_status"] | null;
     fileVersion: string | null;
+    ip: string | null;
     userAgent: string | null;
   },
 ) {
@@ -152,12 +154,18 @@ async function logDownload(
     source: input.source,
     subscription_state_at_download: input.subscriptionStatus,
     file_version: input.fileVersion,
+    ip: input.ip,
     user_agent: input.userAgent,
   });
 
   if (error) {
     throw new AISUserSafeError("Unable to log the download.", "download_log_failed", 500);
   }
+}
+
+function getRequestIp(request: NextRequest) {
+  const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return forwardedFor || request.headers.get("x-real-ip") || null;
 }
 
 function normalizeUuid(value: string) {
